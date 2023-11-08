@@ -81,9 +81,9 @@ static ngx_http_est_dispatch_t ngx_http_est_dispatch[] = {
 
 static ngx_conf_enum_t ngx_http_est_client_verify[] = {
     { ngx_string("none"), VERIFY_NONE },
-    { ngx_string("auth"), VERIFY_AUTHENTICATION },
+ /* { ngx_string("auth"), VERIFY_AUTHENTICATION }, */
     { ngx_string("cert"), VERIFY_CERTIFICATE },
-    { ngx_string("both"), VERIFY_BOTH },
+ /* { ngx_string("both"), VERIFY_BOTH }, */
     { ngx_null_string, 0 },
 };
 

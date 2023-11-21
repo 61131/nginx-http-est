@@ -18,6 +18,9 @@ enum {
     VERIFY_BOTH = 3,
 };
 
+
+static void ngx_http_est_content_simpleenroll(ngx_http_request_t *r);
+
 static void * ngx_http_est_create_loc_conf(ngx_conf_t *cf);
 
 static char * ngx_http_est_directive_enable(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
@@ -27,6 +30,10 @@ static char * ngx_http_est_directive_root_certificate(ngx_conf_t *cf, ngx_comman
 static ngx_int_t ngx_http_est_handler(ngx_http_request_t *r);
 
 static ngx_int_t ngx_http_est_handler_cacerts(ngx_http_request_t *r, ngx_buf_t *b);
+
+static ngx_int_t ngx_http_est_handler_csrattrs(ngx_http_request_t *r, ngx_buf_t *b);
+
+static ngx_int_t ngx_http_est_handler_simpleenroll(ngx_http_request_t *r, ngx_buf_t *b);
 
 static ngx_int_t ngx_http_est_initialise(ngx_conf_t *cf);
 
@@ -73,7 +80,20 @@ static ngx_http_est_dispatch_t ngx_http_est_dispatch[] = {
     { ngx_string("simpleenroll"),
         NGX_HTTP_GET|NGX_HTTP_POST, /* NGX_HTTP_POST */
         1,
-        NULL },
+        ngx_http_est_handler_simpleenroll },
+
+    /*
+        4.5.1. CSR Attributes Request
+
+        The EST client requests a list of CA-desired CSR attributes from the CA by
+        sending an HTTPS GET message to the EST server with an operations path of
+        "/csrattrs".
+    */
+
+    { ngx_string("csrattrs"),
+        NGX_HTTP_GET,
+        0,
+        ngx_http_est_handler_csrattrs },
 
     { ngx_string(""), 0, 0, NULL }
 };
@@ -95,19 +115,19 @@ static ngx_command_t ngx_http_est_commands[] = {
         offsetof(ngx_http_est_loc_conf_t, enable),
         NULL },
         
-    { ngx_string("est_verify_client"),
-        NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_conf_set_enum_slot,
-        NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_est_loc_conf_t, verify_client),
-        &ngx_http_est_client_verify },
-
     { ngx_string("est_root_certificate"),
         NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
         ngx_http_est_directive_root_certificate,
         NGX_HTTP_LOC_CONF_OFFSET,
         offsetof(ngx_http_est_loc_conf_t, root_certificate),
         NULL },
+
+    { ngx_string("est_verify_client"),
+        NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_conf_set_enum_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_est_loc_conf_t, verify_client),
+        &ngx_http_est_client_verify },
 
     ngx_null_command
 };
@@ -137,6 +157,20 @@ ngx_module_t ngx_http_est_module = {
     NULL,                               /* exit master */
     NGX_MODULE_V1_PADDING
 };
+
+
+static void
+ngx_http_est_content_simpleenroll(ngx_http_request_t *r) {
+    ngx_int_t rc;
+
+    rc = NGX_HTTP_INTERNAL_SERVER_ERROR;
+    if (r->request_body == NULL) {
+        goto error;
+    }
+
+error:
+    ngx_http_finalize_request(r, rc);
+}
 
 
 static void *
@@ -455,6 +489,40 @@ ngx_http_est_handler_cacerts(ngx_http_request_t *r, ngx_buf_t *b) {
 
     BIO_free(bp);
     return rc;
+}
+
+
+static ngx_int_t 
+ngx_http_est_handler_csrattrs(ngx_http_request_t *r, ngx_buf_t *b) {
+    ngx_http_est_loc_conf_t *lcf;
+
+    lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
+    if (lcf == NULL) {
+        return NGX_DECLINED;
+    }
+    ngx_http_discard_request_body(r);
+
+    return NGX_OK;
+}
+
+
+static ngx_int_t 
+ngx_http_est_handler_simpleenroll(ngx_http_request_t *r, ngx_buf_t *b) {
+    ngx_int_t rc;
+
+    /*
+        This function will process the request headers before establishing a 
+        callback handler to processing the request body which is expected to 
+        contain the certificate signing request (CSR) associated with the 
+        /simpleenroll request.
+    */
+
+    /* assert(r->method == NGX_HTTP_POST); */
+    rc = ngx_http_read_client_request_body(r, ngx_http_est_content_simpleenroll);
+    if (rc >= NGX_HTTP_SPECIAL_RESPONSE) {
+        return rc;
+    }
+    return NGX_OK;
 }
 
 

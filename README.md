@@ -53,6 +53,38 @@ The EST server MUST support the path-prefix of "/.well-known/" as defined in [RF
 
 An EST server may also support service for multiple CAs as indicated by an optional additional path segment between the registered application name and the operation path. This can be supported by this module through the inclusion of multiple location directives within the server configuration.
 
+### est_csr_attrs
+
+* **syntax:** `est_csr_attrs <filename>`
+* **default:** `none`
+* **context:** `location`
+
+Specifies a file containing certificate attributes that should be provided by clients.
+
+CA policy may allow inclusion of client-provided attributes in certificates that is issues, and some of these attributes may describe information that is not available to the CA.
+
+This parameter specifies a file containing an ASN.1 encoded structure that specifies objects and attributes which should be provided by clients. This ASN.1 encoded structure should take the following form described in [RFC 8951](https://datatracker.ietf.org/doc/html/rfc8951):
+
+    CsrAttrs ::= SEQUENCE SIZE (0..Max) OF AttrOrOID
+    
+    AttrOrOID ::= CHOICE {
+      oid        OBJECT IDENTIFIER,
+      attribute  Attribute {{AttrSet}} }
+
+    AttrSet ATTRIBUTE ::= { ... }
+
+This information will be used both in the validation of CSRs received from clients and when responding to requests for CSR attributes required by the EST server.
+
+### est_root_certificate
+
+* **syntax:** `est_root_certificate <filename>`
+* **default:** `none`
+* **context:** `location`
+
+Configures the trust anchor certificate to be used for EST operations.
+
+This directive specifies the certificate - in PEM format - to be returned to EST clients to bootstrap the trust anchor between client and server. EST clients may request this trust anchor certificate information with a HTTPS GET message using an operation path of "/cacerts". The EST server will not require client authentication or authorization to reply to this request.
+
 ### est_verify_client
 
 * **syntax:** `est_verify_client none|auth|cert|both`
@@ -65,18 +97,8 @@ The EST server authenticates and authorizes EST clients as specified in Sections
 
 The only values supported for the est_verify_client directive at this time are `none` and `cert` (certificate).
 
-### est_root_certificate
-
-* **syntax:** `est_root_certificate <filename>`
-* **default:** `none`
-* **context:** `location`
-
-Configures the trust anchor certificate to be used for EST operations.
-
-This directive specifies the certificate - in PEM format - to be returned to EST clients to bootstrap the trust anchor between client and server. EST clients may request this trust anchor certificate information with a HTTPS GET message using an operation path of "/cacerts". The EST server will not require client authentication or authorization to reply to this request.
-
 ## References
 
 * [RFC 7030 Enrollment over Secure Transport](https://datatracker.ietf.org/doc/html/rfc7030)
- 
+* [RFC 8951 Clarification of Enrollment over Secure Transport (EST): Transfer Encodings and ASN.1](https://datatracker.ietf.org/doc/html/rfc8951)
 

@@ -53,7 +53,13 @@ Enable EST operations for HTTP SSL server location.
 
 The EST server MUST support the path-prefix of "/.well-known/" as defined in [RFC 5785](https://datatracker.ietf.org/doc/html/rfc5785) and the registered name of "est". As such, the default EST server URI path would be "https://www.example.com/.well-known/est". This can be configured through the creation of a location definition for "/.well-known/est" as shown in the example configuration above.
 
-An EST server may also support service for multiple CAs as indicated by an optional additional path segment between the registered application name and the operation path. This can be supported by this module through the inclusion of multiple location directives within the server configuration.
+An EST server may also support service for multiple CAs as indicated by an optional additional path segment between the registered application name and the operation path. For example, the following are three example valid URLs for the distribution of CA certificates:
+
+* [https://www.example.com/.well-known/est/cacerts](https://www.example.com/.well-known/est/cacerts)
+* [https://www.example.com/.well-known/est/arbitraryLabel1/cacerts](https://www.example.com/.well-known/est/arbitraryLabel1/cacerts)
+* [https://www.example.com/.well-known/est/arbitraryLabel2/cacerts](https://www.example.com/.well-known/est/arbitraryLabel2/cacerts)
+
+This configuration can be supported by this module through the inclusion of multiple location directives within the server configuration.
 
 ### est_csr_attrs
 

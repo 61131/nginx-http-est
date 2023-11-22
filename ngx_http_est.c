@@ -9,6 +9,7 @@
 #include <openssl/x509.h>
 
 #include "ngx_http_est.h"
+#include "ngx_http_est_base64.h"
 
 
 #define ASN1_PARSE_MAXDEPTH     (128)
@@ -21,8 +22,6 @@ enum {
     VERIFY_BOTH = 3,
 };
 
-
-static u_char * ngx_http_est_base64_encode(ngx_http_request_t *r, const char *data, size_t *length);
 
 static void ngx_http_est_content_simpleenroll(ngx_http_request_t *r);
 
@@ -184,46 +183,6 @@ ngx_http_est_content_simpleenroll(ngx_http_request_t *r) {
 
 error:
     ngx_http_finalize_request(r, rc);
-}
-
-
-static u_char * 
-ngx_http_est_base64_encode(ngx_http_request_t *r, const char *data, size_t *length) {
-    BIO *b64, *mem;
-    BUF_MEM *ptr;
-    u_char *b;
-
-    /*
-        This function is intended to perform base64 encoding which represents 24-bit 
-        groups of input bits as output strings of four encoded characters. A 24-bit 
-        group is formed by concatenating three 8-bit inputs which are then treated 
-        as 4 concatenated 6-bit groups. These 6-bit groups are then translated to a 
-        single digit in the base64 alphabet.
-    */
-
-    b64 = mem = NULL;
-    b = NULL;
-
-    if (((b64 = BIO_new(BIO_f_base64())) == NULL) ||
-            ((mem = BIO_new(BIO_s_mem())) == NULL)) {
-        goto error;
-    }
-    mem = BIO_push(b64, mem);
-    if (BIO_write(mem, data, *length) < 0) {
-        goto error;
-    }
-    BIO_flush(mem);
-    BIO_get_mem_ptr(mem, &ptr);
-    /* assert(ptr != NULL); */
-    if ((b = ngx_pcalloc(r->pool, ptr->length)) == NULL) {
-        goto error;
-    }
-    (void) ngx_copy(b, ptr->data, ptr->length);
-    *length = ptr->length;
-
-error:
-    BIO_free_all(mem);
-    return b;
 }
 
 

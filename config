@@ -1,7 +1,9 @@
 ngx_addon_name=ngx_http_est_module
 
-DEPS="$ngx_addon_dir/ngx_http_est.h"
-SRCS="$ngx_addon_dir/ngx_http_est.c"
+DEPS="$ngx_addon_dir/ngx_http_est.h \
+    $ngx_addon_dir/ngx_http_est_base64.h"
+SRCS="$ngx_addon_dir/ngx_http_est.c \
+    $ngx_addon_dir/ngx_http_est_base64.c"
 
 LIBS="-lcrypto -lssl"
 

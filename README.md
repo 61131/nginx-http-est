@@ -63,7 +63,7 @@ Specifies a file containing certificate attributes that should be provided by cl
 
 CA policy may allow inclusion of client-provided attributes in certificates that is issues, and some of these attributes may describe information that is not available to the CA.
 
-This parameter specifies a file containing an ASN.1 encoded structure that specifies objects and attributes which should be provided by clients. This ASN.1 encoded structure should take the following form described in [RFC 8951](https://datatracker.ietf.org/doc/html/rfc8951):
+This parameter specifies a file containing an ASN.1 encoded structure, in Distinguished Encoding Rules (DER) format, that specifies objects and attributes which should be provided by clients. This ASN.1 encoded structure should take the form as described in [RFC 8951](https://datatracker.ietf.org/doc/html/rfc8951):
 
     CsrAttrs ::= SEQUENCE SIZE (0..Max) OF AttrOrOID
     
@@ -73,7 +73,9 @@ This parameter specifies a file containing an ASN.1 encoded structure that speci
 
     AttrSet ATTRIBUTE ::= { ... }
 
-This information will be used both in the validation of CSRs received from clients and when responding to requests for CSR attributes required by the EST server.
+See OpenSSL [asn1parse](https://www.openssl.org/docs/man1.1.1/man1/openssl-asn1parse.html) for details on how to create this ASN.1 specification.
+
+This information will be used both in the validation of CSRs received from clients and when responding to requests for CSR attributes (using an operation path of "/csrattrs") required by the EST server. The EST server does not require client authentication or authorization to respond to requests for CSR attributes.
 
 ### est_root_certificate
 
@@ -95,7 +97,7 @@ Configures the mechanism to be used for verifying EST clients.
 
 The EST server authenticates and authorizes EST clients as specified in Sections 3.3.2, 3.3.3 and 3.7 in [RFC 7030](https://datatracker.ietf.org/doc/html/rfc7030).
 
-The only values supported for the est_verify_client directive at this time are `none` and `cert` (certificate).
+The only values supported for this directive at this time are `none` and `cert` (certificate).
 
 ## References
 

@@ -11,6 +11,9 @@
 #include "ngx_http_est.h"
 
 
+#define ASN1_PARSE_MAXDEPTH     (128)
+
+
 enum {
     VERIFY_NONE = 0,
     VERIFY_AUTHENTICATION = 1,
@@ -19,9 +22,13 @@ enum {
 };
 
 
+static u_char * ngx_http_est_base64_encode(ngx_http_request_t *r, const char *data, size_t *length);
+
 static void ngx_http_est_content_simpleenroll(ngx_http_request_t *r);
 
 static void * ngx_http_est_create_loc_conf(ngx_conf_t *cf);
+
+static char * ngx_http_est_directive_csr_attrs(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 
 static char * ngx_http_est_directive_enable(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 
@@ -115,6 +122,13 @@ static ngx_command_t ngx_http_est_commands[] = {
         offsetof(ngx_http_est_loc_conf_t, enable),
         NULL },
         
+    { ngx_string("est_csr_attrs"),
+        NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_http_est_directive_csr_attrs,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_est_loc_conf_t, csr_attrs),
+        NULL },
+
     { ngx_string("est_root_certificate"),
         NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
         ngx_http_est_directive_root_certificate,
@@ -173,25 +187,145 @@ error:
 }
 
 
+static u_char * 
+ngx_http_est_base64_encode(ngx_http_request_t *r, const char *data, size_t *length) {
+    BIO *b64, *mem;
+    BUF_MEM *ptr;
+    u_char *b;
+
+    /*
+        This function is intended to perform base64 encoding which represents 24-bit 
+        groups of input bits as output strings of four encoded characters. A 24-bit 
+        group is formed by concatenating three 8-bit inputs which are then treated 
+        as 4 concatenated 6-bit groups. These 6-bit groups are then translated to a 
+        single digit in the base64 alphabet.
+    */
+
+    b64 = mem = NULL;
+    b = NULL;
+
+    if (((b64 = BIO_new(BIO_f_base64())) == NULL) ||
+            ((mem = BIO_new(BIO_s_mem())) == NULL)) {
+        goto error;
+    }
+    mem = BIO_push(b64, mem);
+    if (BIO_write(mem, data, *length) < 0) {
+        goto error;
+    }
+    BIO_flush(mem);
+    BIO_get_mem_ptr(mem, &ptr);
+    /* assert(ptr != NULL); */
+    if ((b = ngx_pcalloc(r->pool, ptr->length)) == NULL) {
+        goto error;
+    }
+    (void) ngx_copy(b, ptr->data, ptr->length);
+    *length = ptr->length;
+
+error:
+    BIO_free_all(mem);
+    return b;
+}
+
+
 static void *
 ngx_http_est_create_loc_conf(ngx_conf_t *cf) {
-    ngx_http_est_loc_conf_t *elcf;
+    ngx_http_est_loc_conf_t *lcf;
     
-    elcf = ngx_pcalloc(cf->pool, sizeof(ngx_http_est_loc_conf_t));
-    if (elcf == NULL) {
+    lcf = ngx_pcalloc(cf->pool, sizeof(ngx_http_est_loc_conf_t));
+    if (lcf == NULL) {
         return NULL;
     }
 
     /*
         set by ngx_pcalloc():
-            elcf->root_certificate = { 0, NULL };
-            elcf->root = NULL;
+            lcf->csr_attrs = { 0, NULL };
+            lcf->root_certificate = { 0, NULL };
     */
 
-    elcf->enable = NGX_CONF_UNSET;
-    elcf->verify_client = NGX_CONF_UNSET;
+    lcf->buf = NGX_CONF_UNSET_PTR;
+    lcf->enable = NGX_CONF_UNSET;
+    lcf->length = NGX_CONF_UNSET_SIZE;
+    lcf->root = NGX_CONF_UNSET_PTR;
+    lcf->verify_client = NGX_CONF_UNSET;
 
-    return elcf;
+    return lcf;
+}
+
+
+static char * 
+ngx_http_est_directive_csr_attrs(ngx_conf_t *cf, ngx_command_t *cmd, void *conf) {
+    BIO *in, *out;
+    BUF_MEM *buf;
+    ngx_http_est_loc_conf_t *lcf;
+    size_t length;
+    char *rv;
+    int ret;
+
+    rv = ngx_conf_set_str_slot(cf, cmd, conf);
+    if (rv != NGX_CONF_OK) {
+        return rv;
+    }
+    lcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_est_module);
+    if (lcf == NULL) {
+        return NGX_CONF_ERROR;
+    }
+
+    /*
+        The following code attempts to parse and cache the ASN.1 sequence specified 
+        in the est_csr_attrs directive. This information will be used for both the 
+        validation of attributes in CSRs received from clients and when responding 
+        to requests for a list of such attributes ("/csrattrs").
+
+        NB: Only DER encoded CSR attributes file is supported at this stage
+    */
+
+    rv = NGX_CONF_ERROR;
+
+    in = out = NULL;
+    buf = NULL;
+
+    if ((in = BIO_new_file((char *) lcf->csr_attrs.data, "rb")) == NULL) {
+        goto error;
+    }
+    if ((buf = BUF_MEM_new()) == NULL) {
+        goto error;
+    }
+    for (length = 0;;) {
+        if (!BUF_MEM_grow(buf, BUFSIZ + length)) {
+            goto error;
+        }
+        ret = BIO_read(in, &(buf->data[length]), BUFSIZ);
+        if (ret <= 0) {
+            break;
+        }
+        length += ret;
+    }
+    if (length > 0) {
+        if ((out = BIO_new(BIO_s_mem())) == NULL) {
+            goto error;
+        }
+        //  Need to do something with the ASN.1 sequence
+        if (!ASN1_parse(out, (const unsigned char *) buf->data, length, 0)) {
+            ngx_log_error(NGX_LOG_EMERG, cf->log, 0, 
+                    "error reading CSR attributes: \"%*s\"",
+                    lcf->csr_attrs.len,
+                    lcf->csr_attrs.data);
+            goto error;
+        }
+    }
+
+    lcf->buf = buf;
+    lcf->length = length;
+    rv = NGX_CONF_OK;
+
+error:
+    BIO_free(in);
+    BIO_free(out);
+
+    if (rv != NGX_CONF_OK) {
+        BUF_MEM_free(buf);
+    }
+    return rv;
 }
 
 
@@ -235,7 +369,6 @@ ngx_http_est_directive_root_certificate(ngx_conf_t *cf, ngx_command_t *cmd, void
     if (rv != NGX_CONF_OK) {
         return rv;
     }
-
     lcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_est_module);
     if (lcf == NULL) {
         return NGX_CONF_ERROR;
@@ -400,6 +533,12 @@ ngx_http_est_handler(ngx_http_request_t *r) {
         return NGX_HTTP_NOT_FOUND;
     }
     
+    if (r->method != NGX_HTTP_POST) {
+        ngx_http_discard_request_body(r);
+    }
+    r->headers_out.content_type_lowcase = NULL;
+    r->headers_out.status = NGX_HTTP_OK;
+
     b = ngx_pcalloc(r->pool, sizeof(ngx_buf_t));
     if (b == NULL) {
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
@@ -416,9 +555,6 @@ ngx_http_est_handler(ngx_http_request_t *r) {
         return rc;
     }
     b->last_buf = (r == r->main) ? 1 :0;
-
-    r->headers_out.content_type_lowcase = NULL;
-    r->headers_out.status = NGX_HTTP_OK;
     r->headers_out.content_length_n = b->last - b->pos;
 
     rc = ngx_http_send_header(r);
@@ -437,22 +573,16 @@ ngx_http_est_handler_cacerts(ngx_http_request_t *r, ngx_buf_t *b) {
     ngx_http_est_loc_conf_t *lcf;
     ngx_table_elt_t *h;
     BIO *bp;
+    BUF_MEM *ptr;
     u_char *content;
-    char *data;
-    int c, rc;
+    int rc;
 
     lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
     if (lcf == NULL) {
         return NGX_DECLINED;
     }
-    ngx_http_discard_request_body(r);
 
-    /*
-        Populate the response headers and body for /cacerts request - Note that this 
-        implementation may be modified such that more of the header content is 
-        generated within the ngx_http_est_handler function.
-    */
-
+    r->headers_out.status = NGX_HTTP_OK;
     r->headers_out.content_type_len = sizeof("application/pkcs7-mime") - 1;
     ngx_str_set(&r->headers_out.content_type, "application/pkcs7-mime");
     h = ngx_list_push(&r->headers_out.headers);
@@ -463,30 +593,24 @@ ngx_http_est_handler_cacerts(ngx_http_request_t *r, ngx_buf_t *b) {
     ngx_str_set(&h->value, "base64");
     h->hash = 1;
 
-    rc = NGX_HTTP_INTERNAL_SERVER_ERROR;
-    if ((bp = BIO_new(BIO_s_mem())) == NULL) {
-        return rc;
+    rc = NGX_ERROR;
+    if (((bp = BIO_new(BIO_s_mem())) == NULL) ||
+            (!PEM_write_bio_PKCS7(bp, lcf->root))) {
+        goto error;
     }
 
-    for (;;) {
-        if (!PEM_write_bio_PKCS7(bp, lcf->root)) {
-            break;
-        }
-        if ((c = BIO_get_mem_data(bp, &data)) <= 0) {
-            break;
-        }
-
-        if ((content = ngx_pcalloc(r->pool, c)) == NULL) {
-            break;
-        }
-        b->pos = b->last = content;
-        b->memory = 1;
-        b->last = ngx_copy(b->last, data, c);
-
-        rc = NGX_OK;
-        break;
+    BIO_get_mem_ptr(bp, &ptr);
+    /* assert(ptr != NULL); */
+    if ((content = ngx_pcalloc(r->pool, ptr->length)) == NULL) {
+        goto error;
     }
+    b->pos = b->last = content;
+    b->memory = 1;
+    b->last = ngx_copy(b->last, ptr->data, ptr->length);
 
+    rc = NGX_OK;
+
+error:
     BIO_free(bp);
     return rc;
 }
@@ -495,12 +619,35 @@ ngx_http_est_handler_cacerts(ngx_http_request_t *r, ngx_buf_t *b) {
 static ngx_int_t 
 ngx_http_est_handler_csrattrs(ngx_http_request_t *r, ngx_buf_t *b) {
     ngx_http_est_loc_conf_t *lcf;
+    ngx_table_elt_t *h;
+    u_char *content;
+    size_t length;
 
     lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
     if (lcf == NULL) {
         return NGX_DECLINED;
     }
-    ngx_http_discard_request_body(r);
+
+    r->headers_out.status = NGX_HTTP_NO_CONTENT;
+    r->headers_out.content_type_len = sizeof("application/csrattrs") - 1;
+    ngx_str_set(&r->headers_out.content_type, "application/csrattrs");
+    h = ngx_list_push(&r->headers_out.headers);
+    if (h == NULL) {
+        return NGX_ERROR;
+    }
+    ngx_str_set(&h->key, "Content-Type-Encoding");
+    ngx_str_set(&h->value, "base64");
+    h->hash = 1;
+
+    if (lcf->length > 0) {
+        length = lcf->length;
+        content = ngx_http_est_base64_encode(r, lcf->buf->data, &length);
+        b->pos = b->last = content;
+        b->memory = 1;
+        b->last += length;
+
+        r->headers_out.status = NGX_HTTP_OK;
+    }
 
     return NGX_OK;
 }
@@ -528,7 +675,11 @@ ngx_http_est_handler_simpleenroll(ngx_http_request_t *r, ngx_buf_t *b) {
 
 static ngx_int_t 
 ngx_http_est_initialise(ngx_conf_t *cf) {
-//  Add checks to ensure all configuration requirements fulfilled
+
+    /*
+        TODO: Add checks to ensure that all configuration requirements for EST 
+        operations have been fulfiled.
+    */
 
     return NGX_OK;
 }
@@ -538,15 +689,12 @@ ngx_http_est_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child) {
     ngx_http_est_loc_conf_t *prev = parent;
     ngx_http_est_loc_conf_t *conf = child;
     
-    if (conf->enable == NGX_CONF_UNSET) {
-        conf->enable = (prev->enable != NGX_CONF_UNSET) ? prev->enable : 0;
-    }
+    ngx_conf_merge_value(conf->enable, prev->enable, 0);
     ngx_conf_merge_value(conf->verify_client, prev->verify_client, VERIFY_CERTIFICATE);
+    ngx_conf_merge_ptr_value(conf->root, prev->root, NULL);
+    ngx_conf_merge_ptr_value(conf->buf, prev->buf, NULL);
+    ngx_conf_merge_size_value(conf->length, prev->length, 0);
     
-    if (conf->root == NULL) {
-        conf->root = (prev->root != NULL) ? prev->root : NULL;
-    }
-
     return NGX_CONF_OK;
 }
 

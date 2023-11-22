@@ -35,7 +35,9 @@ Note that the nginx-http-est module is dependent upon the HTTP SSL module for no
         location /.well-known/est {
             est on;
             est_verify_client cert;
+
             est_root_certificate /etc/nginx/ssl/Org-RootCA.crt;
+            est_csr_attrs /etc/nginx/ssl/csrattrs.der;
         }
     }
 

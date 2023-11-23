@@ -12,7 +12,7 @@
 #include "ngx_http_est_base64.h"
 
 
-#define ASN1_PARSE_MAXDEPTH     (128)
+#define MODULE_NAME     ("est")
 
 
 enum {
@@ -23,27 +23,30 @@ enum {
 };
 
 
+static ngx_int_t ngx_http_est_auth(ngx_http_request_t *r);
+
+static char * ngx_http_est_command_csr_attrs(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+
+static char * ngx_http_est_command_enable(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+
+static char * ngx_http_est_command_root_certificate(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+
 static void ngx_http_est_content_simpleenroll(ngx_http_request_t *r);
 
 static void * ngx_http_est_create_loc_conf(ngx_conf_t *cf);
 
-static char * ngx_http_est_directive_csr_attrs(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
-
-static char * ngx_http_est_directive_enable(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
-
-static char * ngx_http_est_directive_root_certificate(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
-
-static ngx_int_t ngx_http_est_handler(ngx_http_request_t *r);
-
-static ngx_int_t ngx_http_est_handler_cacerts(ngx_http_request_t *r, ngx_buf_t *b);
-
-static ngx_int_t ngx_http_est_handler_csrattrs(ngx_http_request_t *r, ngx_buf_t *b);
-
-static ngx_int_t ngx_http_est_handler_simpleenroll(ngx_http_request_t *r, ngx_buf_t *b);
-
 static ngx_int_t ngx_http_est_initialise(ngx_conf_t *cf);
 
 static char * ngx_http_est_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child);
+
+static ngx_int_t ngx_http_est_request(ngx_http_request_t *r);
+
+static ngx_int_t ngx_http_est_request_cacerts(ngx_http_request_t *r, ngx_buf_t *b);
+
+static ngx_int_t ngx_http_est_request_csrattrs(ngx_http_request_t *r, ngx_buf_t *b);
+
+static ngx_int_t ngx_http_est_request_simpleenroll(ngx_http_request_t *r, ngx_buf_t *b);
+
 
 
 typedef struct {
@@ -71,7 +74,7 @@ static ngx_http_est_dispatch_t ngx_http_est_dispatch[] = {
     { ngx_string("cacerts"),
         NGX_HTTP_GET,
         0,
-        ngx_http_est_handler_cacerts },
+        ngx_http_est_request_cacerts },
 
     /*
         4.2. Client Certificate Request Functions
@@ -86,7 +89,7 @@ static ngx_http_est_dispatch_t ngx_http_est_dispatch[] = {
     { ngx_string("simpleenroll"),
         NGX_HTTP_GET|NGX_HTTP_POST, /* NGX_HTTP_POST */
         1,
-        ngx_http_est_handler_simpleenroll },
+        ngx_http_est_request_simpleenroll },
 
     /*
         4.5.1. CSR Attributes Request
@@ -99,7 +102,7 @@ static ngx_http_est_dispatch_t ngx_http_est_dispatch[] = {
     { ngx_string("csrattrs"),
         NGX_HTTP_GET,
         0,
-        ngx_http_est_handler_csrattrs },
+        ngx_http_est_request_csrattrs },
 
     { ngx_string(""), 0, 0, NULL }
 };
@@ -107,30 +110,37 @@ static ngx_http_est_dispatch_t ngx_http_est_dispatch[] = {
 
 static ngx_conf_enum_t ngx_http_est_client_verify[] = {
     { ngx_string("none"), VERIFY_NONE },
- /* { ngx_string("auth"), VERIFY_AUTHENTICATION }, */
+    { ngx_string("auth"), VERIFY_AUTHENTICATION }, 
     { ngx_string("cert"), VERIFY_CERTIFICATE },
- /* { ngx_string("both"), VERIFY_BOTH }, */
+    { ngx_string("both"), VERIFY_BOTH }, 
     { ngx_null_string, 0 },
 };
 
 static ngx_command_t ngx_http_est_commands[] = {
     { ngx_string("est"),
         NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
-        ngx_http_est_directive_enable,
+        ngx_http_est_command_enable,
         NGX_HTTP_LOC_CONF_OFFSET,
         offsetof(ngx_http_est_loc_conf_t, enable),
         NULL },
         
+    { ngx_string("est_auth_request"),
+        NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_conf_set_str_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_est_loc_conf_t, uri),
+        NULL },
+
     { ngx_string("est_csr_attrs"),
         NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_http_est_directive_csr_attrs,
+        ngx_http_est_command_csr_attrs,
         NGX_HTTP_LOC_CONF_OFFSET,
         offsetof(ngx_http_est_loc_conf_t, csr_attrs),
         NULL },
 
     { ngx_string("est_root_certificate"),
         NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_http_est_directive_root_certificate,
+        ngx_http_est_command_root_certificate,
         NGX_HTTP_LOC_CONF_OFFSET,
         offsetof(ngx_http_est_loc_conf_t, root_certificate),
         NULL },
@@ -172,50 +182,30 @@ ngx_module_t ngx_http_est_module = {
 };
 
 
-static void
-ngx_http_est_content_simpleenroll(ngx_http_request_t *r) {
-    ngx_int_t rc;
-
-    rc = NGX_HTTP_INTERNAL_SERVER_ERROR;
-    if (r->request_body == NULL) {
-        goto error;
-    }
-
-error:
-    ngx_http_finalize_request(r, rc);
-}
-
-
-static void *
-ngx_http_est_create_loc_conf(ngx_conf_t *cf) {
+static ngx_int_t 
+ngx_http_est_auth(ngx_http_request_t *r) {
     ngx_http_est_loc_conf_t *lcf;
-    
-    lcf = ngx_pcalloc(cf->pool, sizeof(ngx_http_est_loc_conf_t));
-    if (lcf == NULL) {
-        return NULL;
+
+    lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
+    if ((lcf->verify_client & VERIFY_AUTHENTICATION) == 0) {
+        return NGX_DECLINED;
+    }
+    if (lcf->uri.len == 0) {
+        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                "%s: missing subrequest uri", 
+                MODULE_NAME);
+        return NGX_ERROR;
     }
 
-    /*
-        set by ngx_pcalloc():
-            lcf->csr_attrs = { 0, NULL };
-            lcf->root_certificate = { 0, NULL };
-    */
-
-    lcf->buf = NGX_CONF_UNSET_PTR;
-    lcf->enable = NGX_CONF_UNSET;
-    lcf->length = NGX_CONF_UNSET_SIZE;
-    lcf->root = NGX_CONF_UNSET_PTR;
-    lcf->verify_client = NGX_CONF_UNSET;
-
-    return lcf;
+    return NGX_OK;
 }
 
 
 static char * 
-ngx_http_est_directive_csr_attrs(ngx_conf_t *cf, ngx_command_t *cmd, void *conf) {
+ngx_http_est_command_csr_attrs(ngx_conf_t *cf, ngx_command_t *cmd, void *conf) {
+    ngx_http_est_loc_conf_t *lcf = conf;
     BIO *in, *out;
     BUF_MEM *buf;
-    ngx_http_est_loc_conf_t *lcf;
     size_t length;
     char *rv;
     int ret;
@@ -223,10 +213,6 @@ ngx_http_est_directive_csr_attrs(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     rv = ngx_conf_set_str_slot(cf, cmd, conf);
     if (rv != NGX_CONF_OK) {
         return rv;
-    }
-    lcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_est_module);
-    if (lcf == NULL) {
-        return NGX_CONF_ERROR;
     }
 
     /*
@@ -266,7 +252,8 @@ ngx_http_est_directive_csr_attrs(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         //  Need to do something with the ASN.1 sequence
         if (!ASN1_parse(out, (const unsigned char *) buf->data, length, 0)) {
             ngx_log_error(NGX_LOG_EMERG, cf->log, 0, 
-                    "error reading CSR attributes: \"%*s\"",
+                    "%s: error reading CSR attributes: \"%*s\"",
+                    MODULE_NAME,
                     lcf->csr_attrs.len,
                     lcf->csr_attrs.data);
             goto error;
@@ -289,7 +276,7 @@ error:
 
 
 static char * 
-ngx_http_est_directive_enable(ngx_conf_t *cf, ngx_command_t *cmd, void *conf) {
+ngx_http_est_command_enable(ngx_conf_t *cf, ngx_command_t *cmd, void *conf) {
     ngx_http_ssl_srv_conf_t *sscf;
     ngx_http_core_loc_conf_t *clcf;
     char *rv;
@@ -302,19 +289,20 @@ ngx_http_est_directive_enable(ngx_conf_t *cf, ngx_command_t *cmd, void *conf) {
     sscf = ngx_http_conf_get_module_srv_conf(cf, ngx_http_ssl_module);
     if (sscf->verify != /* optional */ 2) {
         ngx_log_error(NGX_LOG_EMERG, cf->log, 0,
-                "ssl_verify_client must be set to \"optional\" for est operations");
+                "%s: ssl_verify_client must be set to \"optional\"",
+                MODULE_NAME);
         return NGX_CONF_ERROR;
     }
  
     clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
-    clcf->handler = ngx_http_est_handler;
+    clcf->handler = ngx_http_est_request;
     return NGX_CONF_OK;
 }
 
 
 static char * 
-ngx_http_est_directive_root_certificate(ngx_conf_t *cf, ngx_command_t *cmd, void *conf) {
-    ngx_http_est_loc_conf_t *lcf;
+ngx_http_est_command_root_certificate(ngx_conf_t *cf, ngx_command_t *cmd, void *conf) {
+    ngx_http_est_loc_conf_t *lcf = conf;
     BIO *bp;
     PKCS7 *p7;
     PKCS7_SIGNED *p7s;
@@ -327,10 +315,6 @@ ngx_http_est_directive_root_certificate(ngx_conf_t *cf, ngx_command_t *cmd, void
     rv = ngx_conf_set_str_slot(cf, cmd, conf);
     if (rv != NGX_CONF_OK) {
         return rv;
-    }
-    lcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_est_module);
-    if (lcf == NULL) {
-        return NGX_CONF_ERROR;
     }
  
     /*
@@ -365,14 +349,16 @@ ngx_http_est_directive_root_certificate(ngx_conf_t *cf, ngx_command_t *cmd, void
     p7s->cert = stack;
     if ((bp = BIO_new_file((const char *)lcf->root_certificate.data, "r")) == NULL) {
         ngx_log_error(NGX_LOG_EMERG, cf->log, 0,
-                "error opening root certificate: \"%*s\"",
+                "%s: error opening root certificate: \"%*s\"",
+                MODULE_NAME,
                 lcf->root_certificate.len,
                 lcf->root_certificate.data);
         goto error;
     }
     if ((sk = PEM_X509_INFO_read_bio(bp, NULL, NULL, NULL)) == NULL) {
         ngx_log_error(NGX_LOG_EMERG, cf->log, 0,
-                "error reading root certificate: \"%*s\"",
+                "%s: error reading root certificate: \"%*s\"",
+                MODULE_NAME,
                 lcf->root_certificate.len,
                 lcf->root_certificate.data);
         goto error;
@@ -404,8 +390,89 @@ error:
 }
 
 
+static void
+ngx_http_est_content_simpleenroll(ngx_http_request_t *r) {
+    ngx_int_t rc;
+
+    rc = NGX_HTTP_INTERNAL_SERVER_ERROR;
+    if (r->request_body == NULL) {
+        goto error;
+    }
+
+error:
+    ngx_http_finalize_request(r, rc);
+}
+
+
+static void *
+ngx_http_est_create_loc_conf(ngx_conf_t *cf) {
+    ngx_http_est_loc_conf_t *lcf;
+    
+    lcf = ngx_pcalloc(cf->pool, sizeof(ngx_http_est_loc_conf_t));
+    if (lcf == NULL) {
+        return NULL;
+    }
+
+    /*
+        set by ngx_pcalloc():
+            lcf->csr_attrs = { 0, NULL };
+            lcf->root_certificate = { 0, NULL };
+            lcf->uri = { 0, NULL };
+    */
+
+    lcf->buf = NGX_CONF_UNSET_PTR;
+    lcf->enable = NGX_CONF_UNSET;
+    lcf->length = NGX_CONF_UNSET_SIZE;
+    lcf->root = NGX_CONF_UNSET_PTR;
+    lcf->verify_client = NGX_CONF_UNSET;
+
+    return lcf;
+}
+
+
+static ngx_int_t 
+ngx_http_est_initialise(ngx_conf_t *cf) {
+    ngx_http_core_main_conf_t *cmcf;
+    ngx_http_handler_pt *h;
+
+    /*
+        TODO: Add checks to ensure that all configuration requirements for EST 
+        operations have been fulfiled.
+    */
+
+    /*
+        The following installs this module as an access handler for HTTP requests. 
+        This will be used to selectively perform authorization checks depending upon 
+        the client verification configuration in place for a given location.
+    */
+
+    cmcf = ngx_http_conf_get_module_main_conf(cf, ngx_http_core_module);
+    h = ngx_array_push(&cmcf->phases[NGX_HTTP_ACCESS_PHASE].handlers);
+    if (h == NULL) {
+        return NGX_ERROR;
+    }
+    *h = ngx_http_est_auth;
+
+    return NGX_OK;
+}
+
+static char *
+ngx_http_est_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child) {
+    ngx_http_est_loc_conf_t *prev = parent;
+    ngx_http_est_loc_conf_t *conf = child;
+    
+    ngx_conf_merge_value(conf->enable, prev->enable, 0);
+    ngx_conf_merge_value(conf->verify_client, prev->verify_client, VERIFY_CERTIFICATE);
+    ngx_conf_merge_ptr_value(conf->root, prev->root, NULL);
+    ngx_conf_merge_ptr_value(conf->buf, prev->buf, NULL);
+    ngx_conf_merge_size_value(conf->length, prev->length, 0);
+    
+    return NGX_CONF_OK;
+}
+
+
 static ngx_int_t
-ngx_http_est_handler(ngx_http_request_t *r) {
+ngx_http_est_request(ngx_http_request_t *r) {
     ngx_http_core_loc_conf_t *clcf;
     ngx_http_est_dispatch_t *d;
     ngx_http_est_loc_conf_t *lcf;
@@ -414,6 +481,16 @@ ngx_http_est_handler(ngx_http_request_t *r) {
     ngx_int_t c, i, rc;
     ngx_str_t verify;
     u_char *ptr, *uri;
+
+    lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
+    if (lcf == NULL) {
+        return NGX_DECLINED;
+    }
+    clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
+    if (clcf == NULL) {
+        return NGX_DECLINED;
+    }
+
 
     /*
         This function implements handling for HTTP requests submitted to the EST API 
@@ -427,17 +504,8 @@ ngx_http_est_handler(ngx_http_request_t *r) {
         return NGX_HTTP_FORBIDDEN;
     }
 
-    lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
-    if (lcf == NULL) {
-        return NGX_DECLINED;
-    }
-
-    clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
-    if (clcf == NULL) {
-        return NGX_DECLINED;
-    }
     ptr = r->uri.data;
-    if (ngx_strstr(ptr, clcf->name.data) != (char *)ptr) {
+    if (ngx_strstr(ptr, clcf->name.data) != (char *) ptr) {
         return NGX_DECLINED;
     }
     ptr += ngx_strlen(clcf->name.data);
@@ -453,7 +521,11 @@ ngx_http_est_handler(ngx_http_request_t *r) {
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
     strncpy((char *)uri, (char *)ptr, c);
-    ngx_log_error(NGX_LOG_INFO, r->connection->log, 0, "est: \"%*s\"", (size_t)c, ptr);
+    ngx_log_error(NGX_LOG_INFO, r->connection->log, 0, "%s: \"%*s\"", 
+            MODULE_NAME,
+            (size_t)c, 
+            ptr);
+
 
     /*
         Determine whether the requested EST API end-point is supported for the given 
@@ -473,6 +545,7 @@ ngx_http_est_handler(ngx_http_request_t *r) {
         }
         if (d->verify) {
             if ((lcf->verify_client & VERIFY_AUTHENTICATION) != 0) {
+                //  NB: Add subrequest processing for authentication
                 return NGX_HTTP_FORBIDDEN;
             }
             if ((lcf->verify_client & VERIFY_CERTIFICATE) != 0) {
@@ -480,7 +553,9 @@ ngx_http_est_handler(ngx_http_request_t *r) {
                     return NGX_HTTP_INTERNAL_SERVER_ERROR;
                 }
                 if (ngx_strcmp(verify.data, "SUCCESS") != 0) {
-                    ngx_log_error(NGX_LOG_WARN, r->connection->log, 0, "failed certificate verification");
+                    ngx_log_error(NGX_LOG_WARN, r->connection->log, 0, 
+                            "%s: failed certificate verification",
+                            MODULE_NAME);
                     return NGX_HTTP_FORBIDDEN;
                 }
             }
@@ -528,7 +603,7 @@ ngx_http_est_handler(ngx_http_request_t *r) {
 
 
 static ngx_int_t 
-ngx_http_est_handler_cacerts(ngx_http_request_t *r, ngx_buf_t *b) {
+ngx_http_est_request_cacerts(ngx_http_request_t *r, ngx_buf_t *b) {
     ngx_http_est_loc_conf_t *lcf;
     ngx_table_elt_t *h;
     BIO *bp;
@@ -576,7 +651,7 @@ error:
 
 
 static ngx_int_t 
-ngx_http_est_handler_csrattrs(ngx_http_request_t *r, ngx_buf_t *b) {
+ngx_http_est_request_csrattrs(ngx_http_request_t *r, ngx_buf_t *b) {
     ngx_http_est_loc_conf_t *lcf;
     ngx_table_elt_t *h;
     u_char *content;
@@ -613,7 +688,7 @@ ngx_http_est_handler_csrattrs(ngx_http_request_t *r, ngx_buf_t *b) {
 
 
 static ngx_int_t 
-ngx_http_est_handler_simpleenroll(ngx_http_request_t *r, ngx_buf_t *b) {
+ngx_http_est_request_simpleenroll(ngx_http_request_t *r, ngx_buf_t *b) {
     ngx_int_t rc;
 
     /*
@@ -631,30 +706,5 @@ ngx_http_est_handler_simpleenroll(ngx_http_request_t *r, ngx_buf_t *b) {
     return NGX_OK;
 }
 
-
-static ngx_int_t 
-ngx_http_est_initialise(ngx_conf_t *cf) {
-
-    /*
-        TODO: Add checks to ensure that all configuration requirements for EST 
-        operations have been fulfiled.
-    */
-
-    return NGX_OK;
-}
-
-static char *
-ngx_http_est_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child) {
-    ngx_http_est_loc_conf_t *prev = parent;
-    ngx_http_est_loc_conf_t *conf = child;
-    
-    ngx_conf_merge_value(conf->enable, prev->enable, 0);
-    ngx_conf_merge_value(conf->verify_client, prev->verify_client, VERIFY_CERTIFICATE);
-    ngx_conf_merge_ptr_value(conf->root, prev->root, NULL);
-    ngx_conf_merge_ptr_value(conf->buf, prev->buf, NULL);
-    ngx_conf_merge_size_value(conf->length, prev->length, 0);
-    
-    return NGX_CONF_OK;
-}
 
 

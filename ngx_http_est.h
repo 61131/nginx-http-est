@@ -18,6 +18,8 @@ typedef struct {
 
     ngx_int_t   verify_client;
 
+    ngx_str_t   uri;
+
     PKCS7       *root;
 
     /*

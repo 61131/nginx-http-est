@@ -34,10 +34,17 @@ Note that the nginx-http-est module is dependent upon the HTTP SSL module for no
 
         location /.well-known/est {
             est on;
+            est_auth_request /auth-backend;
             est_verify_client cert;
 
             est_root_certificate /etc/nginx/ssl/Org-RootCA.crt;
             est_csr_attrs /etc/nginx/ssl/csrattrs.der;
+        }
+
+        location = /auth-backend {
+            proxy_pass ...
+            proxy_pass_request_body off;
+            proxy_set_header Content-Length "";
         }
     }
 
@@ -60,6 +67,20 @@ An EST server may also support service for multiple CAs as indicated by an optio
 * [https://www.example.com/.well-known/est/arbitraryLabel2/cacerts](https://www.example.com/.well-known/est/arbitraryLabel2/cacerts)
 
 This configuration can be supported by this module through the inclusion of multiple location directives within the server configuration.
+
+### est_auth_request
+
+* **syntax:** `est_auth_request <uri>`
+* **default:** `none`
+* **context:** `location`
+
+Enables HTTP-based client authorization based upon the result of a subrequest sent to `<uri>`.
+
+The EST server MAY request HTTP-based client authentication. This request can be in addition to successful TLS client authentication if mandated by EST server configuration. Alternatively, HTTP-based client authentication may be used in situations where an EST client did not successfully complete TLS client authentication - This may occur where the EST client is enrolling for the first time or if the certificates available to the EST client cannot be used for TLS client authentication.
+
+This functionality operates in a similar manner to [ngx_http_auth_request_module](https://nginx.org/en/docs/http/ngx_http_auth_request_module.html). If the subrequest returns a 2xx response code, the client is authorized. If the subrequest returns 401 or 403, the client is denied with the corresponding error code. Where this functionality differs from [ngx_http_auth_request_module](https://nginx.org/en/docs/http/ngx_http_auth_request_module.html) is that authentication is only required for selected operation paths as defined in [RFC 7030](https://datatracker.ietf.org/doc/html/rfc7030).
+
+This approach permits a range of different authorization mechanisms to be employed in concert with EST server operations.
 
 ### est_csr_attrs
 

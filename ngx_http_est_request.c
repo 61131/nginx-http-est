@@ -38,8 +38,9 @@ _ngx_http_est_request_body(ngx_http_request_t *r) {
 static void
 _ngx_http_est_request_simpleenroll(ngx_http_request_t *r) {
     ngx_buf_t *buf;
-    ngx_str_t data, res;
     ngx_int_t rc;
+    ngx_str_t data, res;
+    X509_REQ *req;
 
     rc = NGX_HTTP_INTERNAL_SERVER_ERROR;
     if ((r->request_body == NULL) ||
@@ -59,6 +60,13 @@ _ngx_http_est_request_simpleenroll(ngx_http_request_t *r) {
         goto error;
     }
     ngx_decode_base64(&res, &data);
+    if (d2i_X509_REQ(&req, (const unsigned char **) &res.data, res.len) == NULL) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                "%s: error parsing certificate request",
+                MODULE_NAME);
+        rc = NGX_HTTP_BAD_REQUEST;
+        goto error;
+    }
 
     rc = NGX_HTTP_NO_CONTENT;
 error:
@@ -96,7 +104,8 @@ ngx_http_est_request(ngx_http_request_t *r) {
     */
 
     if (!r->connection->ssl) {
-        return NGX_HTTP_FORBIDDEN;
+//  Remove for development/debugging
+//        return NGX_HTTP_FORBIDDEN;
     }
 
     ptr = r->uri.data;

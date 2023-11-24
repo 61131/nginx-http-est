@@ -6,6 +6,15 @@ The Enrollment over Secure Transport (EST) protocol describes a simple, yet func
 
 The nginx-http-est module provides EST functionality for a Nginx server.
 
+## Features
+
+* Distribution of CA certificates
+* ~~Client certificate request functions~~
+* ~~Full Certificate Management over CMS (CMC)~~
+* ~~Server-side key generation~~
+* CSR attributes
+* TLS certificate and HTTP-based authentication
+
 ## Build
 
 To build the nginx-http-est module from the Nginx source directory:

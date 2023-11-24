@@ -207,7 +207,6 @@ error:
 ngx_int_t 
 ngx_http_est_request_csrattrs(ngx_http_request_t *r, ngx_buf_t *b) {
     ngx_http_est_loc_conf_t *lcf;
-    ngx_table_elt_t *h;
     ngx_str_t data, encoded;
 
     lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
@@ -218,13 +217,6 @@ ngx_http_est_request_csrattrs(ngx_http_request_t *r, ngx_buf_t *b) {
     r->headers_out.status = NGX_HTTP_NO_CONTENT;
     r->headers_out.content_type_len = sizeof("application/csrattrs") - 1;
     ngx_str_set(&r->headers_out.content_type, "application/csrattrs");
-    h = ngx_list_push(&r->headers_out.headers);
-    if (h == NULL) {
-        return NGX_ERROR;
-    }
-    ngx_str_set(&h->key, "Content-Type-Encoding");
-    ngx_str_set(&h->value, "base64");
-    h->hash = 1;
 
     if (lcf->length > 0) {
         data.len = lcf->length;

@@ -9,17 +9,56 @@
 #include "ngx_http_est.h"
 
 
+static ngx_buf_t * _ngx_http_est_request_body(ngx_http_request_t *r);
+
 static void _ngx_http_est_request_simpleenroll(ngx_http_request_t *r);
+
+
+static ngx_buf_t *
+_ngx_http_est_request_body(ngx_http_request_t *r) {
+    ngx_buf_t *b;
+    ngx_chain_t *in;
+    size_t len;
+
+    len = 0;
+    for (in = r->request_body->bufs; in; in = in->next) {
+        len += ngx_buf_size(in->buf);
+    }
+
+    b = ngx_create_temp_buf(r->pool, len);
+    if (b != NULL) {
+        for (in = r->request_body->bufs; in; in = in->next) {
+            b->last = ngx_cpymem(b->last, in->buf->pos, ngx_buf_size(in->buf));
+        }
+    }
+    return b;
+}
 
 
 static void
 _ngx_http_est_request_simpleenroll(ngx_http_request_t *r) {
+    ngx_buf_t *buf;
+    ngx_str_t data, res;
     ngx_int_t rc;
 
     rc = NGX_HTTP_INTERNAL_SERVER_ERROR;
-    if (r->request_body == NULL) {
+    if ((r->request_body == NULL) ||
+            (r->request_body->bufs == NULL)) {
         goto error;
     }
+    buf = _ngx_http_est_request_body(r);
+    if (buf == NULL) {
+        goto error;
+    }
+
+    data.len = ngx_buf_size(buf);
+    data.data = buf->start;
+    res.len = ngx_base64_decoded_length(data.len);
+    res.data = ngx_pcalloc(r->pool, res.len);
+    if (res.data == NULL) {
+        goto error;
+    }
+    ngx_decode_base64(&res, &data);
 
     rc = NGX_HTTP_NO_CONTENT;
 error:
@@ -56,7 +95,7 @@ ngx_http_est_request(ngx_http_request_t *r) {
         segments that may be employed within a configuration.
     */
 
-    if (!r->connection->ssl) {  //  Move to allow /cacerts over HTTP?
+    if (!r->connection->ssl) {
         return NGX_HTTP_FORBIDDEN;
     }
 
@@ -159,7 +198,6 @@ ngx_http_est_request(ngx_http_request_t *r) {
 ngx_int_t 
 ngx_http_est_request_cacerts(ngx_http_request_t *r, ngx_buf_t *b) {
     ngx_http_est_loc_conf_t *lcf;
-    ngx_table_elt_t *h;
     BIO *bp;
     BUF_MEM *ptr;
     u_char *content;
@@ -173,13 +211,6 @@ ngx_http_est_request_cacerts(ngx_http_request_t *r, ngx_buf_t *b) {
     r->headers_out.status = NGX_HTTP_OK;
     r->headers_out.content_type_len = sizeof("application/pkcs7-mime") - 1;
     ngx_str_set(&r->headers_out.content_type, "application/pkcs7-mime");
-    h = ngx_list_push(&r->headers_out.headers);
-    if (h == NULL) {
-        return NGX_ERROR;
-    }
-    ngx_str_set(&h->key, "Content-Type-Encoding");
-    ngx_str_set(&h->value, "base64");
-    h->hash = 1;
 
     rc = NGX_ERROR;
     if (((bp = BIO_new(BIO_s_mem())) == NULL) ||
@@ -207,7 +238,7 @@ error:
 ngx_int_t 
 ngx_http_est_request_csrattrs(ngx_http_request_t *r, ngx_buf_t *b) {
     ngx_http_est_loc_conf_t *lcf;
-    ngx_str_t data, encoded;
+    ngx_str_t data, res;
 
     lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
     if (lcf == NULL) {
@@ -221,15 +252,15 @@ ngx_http_est_request_csrattrs(ngx_http_request_t *r, ngx_buf_t *b) {
     if (lcf->length > 0) {
         data.len = lcf->length;
         data.data = (u_char *)lcf->buf->data;
-        encoded.len = ngx_base64_encoded_length(data.len);
-        encoded.data = ngx_pcalloc(r->pool, encoded.len + 2);
-        if (encoded.data == NULL) {
+        res.len = ngx_base64_encoded_length(data.len);
+        res.data = ngx_pcalloc(r->pool, res.len + 2);
+        if (res.data == NULL) {
             return NGX_ERROR;
         }
-        ngx_encode_base64(&encoded, &data);
-        b->pos = b->last = encoded.data;
+        ngx_encode_base64(&res, &data);
+        b->pos = b->last = res.data;
         b->memory = 1;
-        b->last += encoded.len;
+        b->last += res.len;
         b->last = ngx_copy(b->last, CRLF, 2);
 
         r->headers_out.status = NGX_HTTP_OK;
@@ -241,6 +272,7 @@ ngx_http_est_request_csrattrs(ngx_http_request_t *r, ngx_buf_t *b) {
 
 ngx_int_t 
 ngx_http_est_request_simpleenroll(ngx_http_request_t *r, ngx_buf_t *b) {
+    ngx_str_t value;
     ngx_int_t rc;
 
     /*
@@ -251,6 +283,15 @@ ngx_http_est_request_simpleenroll(ngx_http_request_t *r, ngx_buf_t *b) {
     */
 
     /* assert(r->method == NGX_HTTP_POST); */
+    if ((r->headers_in.content_type == NULL) ||
+            (r->headers_in.content_type->value.data == NULL)) {
+        return NGX_HTTP_BAD_REQUEST;
+    }
+    value = r->headers_in.content_type->value;
+    if (ngx_strcasecmp(value.data, (u_char *) "application/pkcs10") != 0) {
+        return NGX_HTTP_BAD_REQUEST;
+    }
+
     rc = ngx_http_read_client_request_body(r, _ngx_http_est_request_simpleenroll);
     if (rc >= NGX_HTTP_SPECIAL_RESPONSE) {
         return rc;

@@ -33,6 +33,15 @@ typedef struct {
 }
 ngx_http_est_loc_conf_t;
 
+typedef struct {
+    ngx_uint_t done;
+
+    ngx_uint_t status;
+
+    ngx_http_request_t *request;
+}
+ngx_http_est_auth_request_t;
+
 extern ngx_module_t ngx_http_est_module;
 
 #endif  /* _NGX_HTTP_EST_H_INCLUDED_ */

@@ -74,7 +74,7 @@ This configuration can be supported by this module through the inclusion of mult
 * **default:** `none`
 * **context:** `location`
 
-Enables HTTP-based client authorization based upon the result of a subrequest sent to `<uri>`.
+Sets URI location for HTTP-based client authorization.
 
 The EST server MAY request HTTP-based client authentication. This request can be in addition to successful TLS client authentication if mandated by EST server configuration. Alternatively, HTTP-based client authentication may be used in situations where an EST client did not successfully complete TLS client authentication - This may occur where the EST client is enrolling for the first time or if the certificates available to the EST client cannot be used for TLS client authentication.
 
@@ -124,9 +124,11 @@ This directive specifies the certificate - in PEM format - to be returned to EST
 
 Configures the mechanism to be used for verifying EST clients. 
 
-The EST server authenticates and authorizes EST clients as specified in Sections 3.3.2, 3.3.3 and 3.7 in [RFC 7030](https://datatracker.ietf.org/doc/html/rfc7030).
+The EST server may authorize clients based upon either TLS certificate validation as per [RFC 5280](https://datatracker.ietf.org/doc/html/rfc5280) and/or HTTP-based authentication.
 
-The only values supported for this directive at this time are `none` and `cert` (certificate).
+If TLS certificate validation is configured, the client certificate is verified as per the operation of the `ssl_client_certificate` and `ssl_verify_client` HTTP SSL directives. For this operation to work as expected, the `ssl_verify_client` directive must be set to `optional`.
+
+For HTTP-based authentication, the `est_auth_request` directive must be set with the URI location against which subrquests are issued to determine whether the given client is authorized.
 
 ## References
 

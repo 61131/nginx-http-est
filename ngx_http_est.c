@@ -25,6 +25,10 @@ enum {
 
 static ngx_int_t ngx_http_est_auth(ngx_http_request_t *r);
 
+static ngx_int_t ngx_http_est_auth_required(ngx_http_request_t *r);
+
+static ngx_int_t ngx_http_est_auth_response(ngx_http_request_t *r, void *data, ngx_int_t rc);
+
 static char * ngx_http_est_command_csr_attrs(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 
 static char * ngx_http_est_command_enable(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
@@ -185,11 +189,15 @@ ngx_module_t ngx_http_est_module = {
 static ngx_int_t 
 ngx_http_est_auth(ngx_http_request_t *r) {
     ngx_http_est_loc_conf_t *lcf;
+    ngx_http_est_auth_request_t *ctx;
+    ngx_http_request_t *sr;
+    ngx_http_post_subrequest_t *ps;
+    ngx_table_elt_t *h, *ho, **ph;
 
-    lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
-    if ((lcf->verify_client & VERIFY_AUTHENTICATION) == 0) {
-        return NGX_DECLINED;
+    if (!ngx_http_est_auth_required(r)) {
+        return NGX_OK;
     }
+    lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
     if (lcf->uri.len == 0) {
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                 "%s: missing subrequest uri", 
@@ -197,7 +205,141 @@ ngx_http_est_auth(ngx_http_request_t *r) {
         return NGX_ERROR;
     }
 
-    return NGX_OK;
+    /*
+        The following code for issuing a subrequest for determining HTTP based 
+        authentication status has been derived from ngx_http_auth_request_module.
+    */
+
+    ctx = ngx_http_get_module_ctx(r, ngx_http_est_module);
+    if (ctx == NULL) {
+        ctx = ngx_pcalloc(r->pool, sizeof(ngx_http_est_auth_request_t));
+        if (ctx == NULL) {
+            return NGX_ERROR;
+        }
+
+        ps = ngx_pcalloc(r->pool, sizeof(ngx_http_post_subrequest_t));
+        if (ps == NULL) {
+            return NGX_ERROR;
+        }
+        ps->handler = ngx_http_est_auth_response;
+        ps->data = ctx;
+
+        ngx_log_error(NGX_LOG_INFO, r->connection->log, 0, "%s: issuing subrequest for %*s",
+                MODULE_NAME,
+                lcf->uri.len,
+                lcf->uri.data);
+        if (ngx_http_subrequest(r, &lcf->uri, NULL, &sr, ps, NGX_HTTP_SUBREQUEST_WAITED) != NGX_OK) {
+            return NGX_ERROR;
+        }
+
+        sr->request_body = ngx_pcalloc(r->pool, sizeof(ngx_http_request_body_t));
+        if (sr->request_body == NULL) {
+            return NGX_ERROR;
+        }
+        sr->header_only = 1;
+        ctx->request = sr;
+
+        ngx_http_set_ctx(r, ctx, ngx_http_est_module);
+        return NGX_AGAIN;
+    }
+
+    if (!ctx->done) {
+        return NGX_AGAIN;
+    }
+
+    if (ctx->status == NGX_HTTP_FORBIDDEN) {
+        return ctx->status;
+    }
+
+    if (ctx->status == NGX_HTTP_UNAUTHORIZED) {
+        sr = ctx->request;
+        h = sr->headers_out.www_authenticate;
+        if (!h && sr->upstream) {
+            h = sr->upstream->headers_in.www_authenticate;
+        }
+
+        ph = &r->headers_out.www_authenticate;
+        while (h) {
+            ho = ngx_list_push(&r->headers_out.headers);
+            if (ho == NULL) {
+                return NGX_ERROR;
+            }
+
+            *ho = *h;
+            ho->next = NULL;
+            *ph = ho;
+            ph = &ho->next;
+
+            h = h->next;
+        }
+        return ctx->status;
+    }
+    if ((ctx->status >= NGX_HTTP_OK) &&
+            (ctx->status < NGX_HTTP_SPECIAL_RESPONSE)) {
+        return NGX_OK;
+    }
+
+    return NGX_HTTP_INTERNAL_SERVER_ERROR;
+}
+
+
+/*
+    This function is intended to determine whether HTTP-based authorization is 
+    required for the current request. This determination is based upon the EST 
+    location configuration and the EST operation requested.
+*/
+
+static ngx_int_t 
+ngx_http_est_auth_required(ngx_http_request_t *r) {
+    ngx_http_core_loc_conf_t *clcf;
+    ngx_http_est_dispatch_t *d;
+    ngx_http_est_loc_conf_t *lcf;
+    ngx_int_t i, len;
+    u_char *ptr, *uri;
+
+    lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
+    if ((lcf->verify_client & VERIFY_AUTHENTICATION) == 0) {
+        return 0;
+    }
+
+    clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
+    /* assert(ngx_strstr(r->uri.data, clcf->name.data) == r->uri.data); */
+    ptr = r->uri.data + ngx_strlen(clcf->name.data);
+    if (*ptr == '/') {
+        ++ptr;
+    }
+    len = r->uri.len - (ptr - r->uri.data);
+    if (len <= 0) {
+        return 0;
+    }
+    uri = ngx_pcalloc(r->pool, len + 1);
+    if (uri == NULL) {
+        return 0;
+    }
+    strncpy((char *)uri, (char *)ptr, len);
+
+    for (i = 0;; ++i) {
+        d = &ngx_http_est_dispatch[i];
+        if (d->name.len == 0) {
+            break;
+        }
+        if (ngx_strcmp(d->name.data, uri) != 0) {
+            continue;
+        }
+        return (d->verify != 0);
+    }
+
+    return 0;
+}
+
+
+static ngx_int_t
+ngx_http_est_auth_response(ngx_http_request_t *r, void *data, ngx_int_t rc) {
+    ngx_http_est_auth_request_t *ctx = data;
+
+    ctx->done = 1;
+    ctx->status = r->headers_out.status;
+    return rc;
 }
 
 
@@ -394,7 +536,7 @@ static void
 ngx_http_est_content_simpleenroll(ngx_http_request_t *r) {
     ngx_int_t rc;
 
-    rc = NGX_HTTP_INTERNAL_SERVER_ERROR;
+    rc = NGX_HTTP_NO_CONTENT;
     if (r->request_body == NULL) {
         goto error;
     }
@@ -529,7 +671,9 @@ ngx_http_est_request(ngx_http_request_t *r) {
 
     /*
         Determine whether the requested EST API end-point is supported for the given 
-        HTTP method and SSL client verification state.
+        HTTP method and SSL client verification state. Note that HTTP-based 
+        authorization, if configured and required for an operation end-point, is 
+        verified in the access phase handler (ngx_http_est_auth).
     */
 
     for (i = 0, rc = -1;; ++i) {
@@ -544,10 +688,6 @@ ngx_http_est_request(ngx_http_request_t *r) {
             return NGX_HTTP_NOT_ALLOWED;
         }
         if (d->verify) {
-            if ((lcf->verify_client & VERIFY_AUTHENTICATION) != 0) {
-                //  NB: Add subrequest processing for authentication
-                return NGX_HTTP_FORBIDDEN;
-            }
             if ((lcf->verify_client & VERIFY_CERTIFICATE) != 0) {
                 if (ngx_ssl_get_client_verify(r->connection, r->pool, &verify) != NGX_OK) {
                     return NGX_HTTP_INTERNAL_SERVER_ERROR;

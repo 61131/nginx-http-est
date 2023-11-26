@@ -104,6 +104,13 @@ static ngx_command_t ngx_http_est_commands[] = {
         offsetof(ngx_http_est_loc_conf_t, csr_attrs),
         NULL },
 
+    { ngx_string("est_permit_http"),
+        NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_conf_set_flag_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_est_loc_conf_t, permit_http),
+        NULL },
+
     { ngx_string("est_root_certificate"),
         NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
         ngx_http_est_command_root_certificate,
@@ -430,6 +437,7 @@ ngx_http_est_create_loc_conf(ngx_conf_t *cf) {
     */
 
     lcf->enable = NGX_CONF_UNSET;
+    lcf->permit_http = NGX_CONF_UNSET;
     lcf->verify_client = NGX_CONF_UNSET;
     lcf->attributes = NULL;
     lcf->buf = NGX_CONF_UNSET_PTR;
@@ -447,6 +455,7 @@ ngx_http_est_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child) {
     ngx_conf_merge_value(conf->enable, prev->enable, 0);
     ngx_conf_merge_str_value(conf->auth_request, prev->auth_request, "");
     ngx_conf_merge_str_value(conf->csr_attrs, prev->csr_attrs, "");
+    ngx_conf_merge_value(conf->permit_http, prev->permit_http, 0);
     ngx_conf_merge_str_value(conf->root_certificate, prev->root_certificate, "");
     ngx_conf_merge_value(conf->verify_client, prev->verify_client, VERIFY_CERTIFICATE);
     ngx_conf_merge_ptr_value(conf->attributes, prev->attributes, NULL);

@@ -24,6 +24,7 @@ typedef struct {
     ngx_flag_t  enable;
     ngx_str_t   auth_request;
     ngx_str_t   csr_attrs;
+    ngx_flag_t  permit_http;
     ngx_str_t   root_certificate;
     ngx_int_t   verify_client;
 

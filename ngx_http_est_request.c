@@ -12,6 +12,8 @@
 
 static ngx_buf_t * _ngx_http_est_request_body(ngx_http_request_t *r);
 
+static void _ngx_http_est_request_error(ngx_http_request_t *r, ngx_int_t status, char *message);
+
 static void _ngx_http_est_request_simpleenroll(ngx_http_request_t *r);
 
 
@@ -35,16 +37,68 @@ _ngx_http_est_request_body(ngx_http_request_t *r) {
     return b;
 }
 
+static void
+_ngx_http_est_request_error(ngx_http_request_t *r, ngx_int_t status, char *message) {
+    ngx_buf_t *b;
+    ngx_chain_t out;
+    ngx_int_t rc;
+    u_char *content;
+    size_t length;
+
+    length = (message != NULL) ? strlen(message) : 0;
+    content = ngx_pcalloc(r->pool, length + 2);
+    if (content == NULL) {
+        goto error;
+    }
+    b = ngx_pcalloc(r->pool, sizeof(ngx_buf_t));
+    if (b == NULL) {
+        goto error;
+    }
+    b->pos = b->last = content;
+    if (message != NULL) {
+        b->last = ngx_copy(b->last, message, length);
+    }
+    b->last = ngx_copy(b->last, CRLF, 2);
+    b->memory = 1;
+    b->last_buf = (r == r->main) ? 1 : 0;
+
+    out.buf = b;
+    out.next = NULL;
+
+    r->headers_out.content_type_len = sizeof("text/plain") - 1;
+    ngx_str_set(&r->headers_out.content_type, "text/plain");
+    r->headers_out.content_type_lowcase = NULL;
+    r->headers_out.status = status;
+    r->headers_out.content_length_n = b->last - b->pos;
+
+    rc = ngx_http_send_header(r);
+    if ((r->header_only) ||
+            (rc == NGX_ERROR) ||
+            (rc > NGX_OK)) {
+        ngx_http_finalize_request(r, rc);
+        return;
+    }
+
+    rc = ngx_http_output_filter(r, &out);
+    ngx_http_finalize_request(r, rc);
+
+    return;
+
+error:
+    ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+            "%s: error building error response message",
+            MODULE_NAME);
+}
+
 
 static void
 _ngx_http_est_request_simpleenroll(ngx_http_request_t *r) {
     ngx_http_est_loc_conf_t *lcf;
     ngx_buf_t *buf;
-    ngx_int_t rc;
+    ngx_uint_t i;
     BIO *b64, *mem;
     X509_REQ *req;
 
-    rc = NGX_HTTP_INTERNAL_SERVER_ERROR;
     lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
     if (lcf == NULL) {
         goto error;
@@ -82,8 +136,8 @@ _ngx_http_est_request_simpleenroll(ngx_http_request_t *r) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                 "%s: error parsing certificate request",
                 MODULE_NAME);
-        rc = NGX_HTTP_BAD_REQUEST;
-        goto error;
+        _ngx_http_est_request_error(r, NGX_HTTP_BAD_REQUEST, "Error parsing certificate request");
+        return;
     }
     /* assert(req != NULL); */
 
@@ -95,11 +149,21 @@ _ngx_http_est_request_simpleenroll(ngx_http_request_t *r) {
 
     if ((lcf->attributes != NULL) &&
             (lcf->attributes->nelts > 0)) {
+
+        for (i = 0; i < lcf->attributes->nelts; ++i) {
+        }
+
+        if (X509_REQ_get_attr_count(req) == 0) {
+            _ngx_http_est_request_error(r, NGX_HTTP_BAD_REQUEST, "Certificate request missing required attributes");
+            return;
+        }
     }
 
-    rc = NGX_HTTP_NO_CONTENT;
+    ngx_http_finalize_request(r, NGX_HTTP_NO_CONTENT);
+    return;
+
 error:
-    ngx_http_finalize_request(r, rc);
+    _ngx_http_est_request_error(r, NGX_HTTP_INTERNAL_SERVER_ERROR, "Internal server error");
 }
 
 
@@ -132,9 +196,9 @@ ngx_http_est_request(ngx_http_request_t *r) {
         segments that may be employed within a configuration.
     */
 
-    /* assert(r->connection->ssl); */
-    if (!r->connection->ssl) {
-//        return NGX_HTTP_FORBIDDEN;
+    if ((!r->connection->ssl) &&
+            (!lcf->permit_http)) {
+        return NGX_HTTP_FORBIDDEN;
     }
 
     ptr = r->uri.data;
@@ -182,7 +246,7 @@ ngx_http_est_request(ngx_http_request_t *r) {
             if ((lcf->verify_client & VERIFY_CERTIFICATE) != 0) {
                 if (!r->connection->ssl) {
                     ngx_log_error(NGX_LOG_WARN, r->connection->log, 0, 
-                            "%s: client using non-secure connection",
+                            "%s: cannot verify certificate as client using non-secure connection",
                             MODULE_NAME);
                     return NGX_HTTP_FORBIDDEN;
                 }

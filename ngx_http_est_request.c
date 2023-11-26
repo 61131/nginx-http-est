@@ -5,6 +5,7 @@
 #include <openssl/bio.h>
 #include <openssl/pem.h>
 #include <openssl/pkcs7.h>
+#include <openssl/x509.h>
 
 #include "ngx_http_est.h"
 
@@ -40,7 +41,7 @@ _ngx_http_est_request_simpleenroll(ngx_http_request_t *r) {
     ngx_http_est_loc_conf_t *lcf;
     ngx_buf_t *buf;
     ngx_int_t rc;
-    ngx_str_t data, res;
+    BIO *b64, *mem;
     X509_REQ *req;
 
     rc = NGX_HTTP_INTERNAL_SERVER_ERROR;
@@ -58,24 +59,26 @@ _ngx_http_est_request_simpleenroll(ngx_http_request_t *r) {
         goto error;
     }
 
-    data.len = ngx_buf_size(buf);
-    data.data = buf->start;
-    res.len = ngx_base64_decoded_length(data.len);
-    res.data = ngx_pcalloc(r->pool, res.len);
-    if (res.data == NULL) {
-        goto error;
-    }
-    if (ngx_decode_base64(&res, &data) != NGX_OK) {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                "%s: error performing base64 decoding",
-                MODULE_NAME);
-        rc = NGX_HTTP_BAD_REQUEST;
-        goto error;
-    }
+    /*
+        The use of OpenSSL BIO functions for base64 is specifically so that invalid 
+        (non-base64 encoded) bytes in the stream, such as the "BEGIN CERTIFICATE 
+        REQUEST" header and trailer lines, are silently ignored. The presence of 
+        such bytes within the request payload causes the internal nginx base64 
+        decoding functions to abort stream processing.
+    */
 
-    req = d2i_X509_REQ(NULL, (const unsigned char **) &res.data, res.len);
-    /* req = d2i_X509_REQ(NULL, (const unsigned char **) &data.data, data.len); */
-    if (req == NULL) {
+    mem = BIO_new_mem_buf(buf->start, ngx_buf_size(buf));
+    if (mem == NULL) {
+        goto error;
+    }
+    b64 = BIO_new(BIO_f_base64());
+    if (b64 == NULL) {
+        goto error;
+    }
+    BIO_push(b64, mem);
+
+    req = NULL;
+    if (!d2i_X509_REQ_bio(b64, &req)) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                 "%s: error parsing certificate request",
                 MODULE_NAME);

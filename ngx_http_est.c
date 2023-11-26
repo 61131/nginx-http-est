@@ -3,13 +3,16 @@
 #include <ngx_http.h>
 #include <ngx_http_ssl_module.h>
 
+#include <openssl/asn1.h>
 #include <openssl/bio.h>
+#include <openssl/objects.h>
 #include <openssl/pem.h>
-#include <openssl/pkcs7.h>
 #include <openssl/x509.h>
 
 #include "ngx_http_est.h"
 
+
+static int ngx_http_est_asn1_parse(ngx_conf_t *cf, const unsigned char *data, size_t length, void *conf);
 
 static char * ngx_http_est_command_csr_attrs(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 
@@ -19,9 +22,9 @@ static char * ngx_http_est_command_root_certificate(ngx_conf_t *cf, ngx_command_
 
 static void * ngx_http_est_create_loc_conf(ngx_conf_t *cf);
 
-static ngx_int_t ngx_http_est_initialise(ngx_conf_t *cf);
-
 static char * ngx_http_est_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child);
+
+static ngx_int_t ngx_http_est_initialise(ngx_conf_t *cf);
 
 
 ngx_http_est_dispatch_t ngx_http_est_dispatch[] = {
@@ -50,7 +53,7 @@ ngx_http_est_dispatch_t ngx_http_est_dispatch[] = {
     */
 
     { ngx_string("simpleenroll"),
-        NGX_HTTP_GET|NGX_HTTP_POST, /* NGX_HTTP_POST */
+        NGX_HTTP_POST,
         1,
         ngx_http_est_request_simpleenroll },
 
@@ -91,7 +94,7 @@ static ngx_command_t ngx_http_est_commands[] = {
         NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
         ngx_conf_set_str_slot,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_est_loc_conf_t, uri),
+        offsetof(ngx_http_est_loc_conf_t, auth_request),
         NULL },
 
     { ngx_string("est_csr_attrs"),
@@ -145,10 +148,78 @@ ngx_module_t ngx_http_est_module = {
 };
 
 
+static int 
+ngx_http_est_asn1_parse(ngx_conf_t *cf, const unsigned char *data, size_t length, void *conf) {
+    ngx_http_est_loc_conf_t *lcf = conf;
+    ngx_str_t *attribute;
+    ASN1_OBJECT *obj;
+    const unsigned char *p1, *p2;
+    char buf[128];
+    long c, len;
+    int class, nid, tag;
+    int ret, val;
+
+    ret = -1;
+    p1 = data;
+    c = length;
+
+    while (c > 0) {
+        p2 = p1; 
+        val = ASN1_get_object(&p1, &len, &tag, &class, c);
+        if (val & 0x80) {
+            goto error;
+        }
+
+        switch (tag) {
+            case V_ASN1_OBJECT:
+                obj = d2i_ASN1_OBJECT(NULL, &p2, c);
+                if (obj == NULL) {
+                    goto error;
+                }
+                p1 = p2;
+
+                nid = OBJ_obj2nid(obj);
+                if (nid == NID_pkcs9_challengePassword) {
+                    ASN1_OBJECT_free(obj);
+                    break;
+                }
+
+                i2t_ASN1_OBJECT(buf, sizeof(buf), obj);
+                /* assert(lcf != NULL); */
+                /* assert(lcf->attributes != NULL); */
+                attribute = ngx_array_push(lcf->attributes);
+                if (attribute == NULL) {
+                    goto error;
+                }
+                attribute->len = strlen(buf);
+                attribute->data = ngx_pnalloc(cf->pool, attribute->len);
+                if (attribute->data == NULL) {
+                    goto error;
+                }
+                ASN1_OBJECT_free(obj);
+                break;
+
+            case V_ASN1_SEQUENCE:
+            case V_ASN1_SET:
+                break;
+
+            default:
+                p1 += len;
+                break;
+        }
+        c -= (p1 - data);
+    }
+
+    ret = 0;
+error:
+    return ret;
+}
+
+
 static char * 
 ngx_http_est_command_csr_attrs(ngx_conf_t *cf, ngx_command_t *cmd, void *conf) {
     ngx_http_est_loc_conf_t *lcf = conf;
-    BIO *in, *out;
+    BIO *in;
     BUF_MEM *buf;
     size_t length;
     char *rv;
@@ -163,14 +234,16 @@ ngx_http_est_command_csr_attrs(ngx_conf_t *cf, ngx_command_t *cmd, void *conf) {
         The following code attempts to parse and cache the ASN.1 sequence specified 
         in the est_csr_attrs directive. This information will be used for both the 
         validation of attributes in CSRs received from clients and when responding 
-        to requests for a list of such attributes ("/csrattrs").
-
-        NB: Only DER encoded CSR attributes file is supported at this stage
+        to requests for a list of such attributes ("/csrattrs"). As such, this 
+        information is cached in both as a buffer of Distinguished Encoding Rules 
+        (DER) bytes as read from the file and returned to CSR attributes operations
+        ("/csrattrs") and as an array of parsed attributes for validating 
+        certificate requests.
     */
 
     rv = NGX_CONF_ERROR;
 
-    in = out = NULL;
+    in = NULL;
     buf = NULL;
 
     if ((in = BIO_new_file((char *) lcf->csr_attrs.data, "rb")) == NULL) {
@@ -190,13 +263,15 @@ ngx_http_est_command_csr_attrs(ngx_conf_t *cf, ngx_command_t *cmd, void *conf) {
         length += ret;
     }
     if (length > 0) {
-        if ((out = BIO_new(BIO_s_mem())) == NULL) {
-            goto error;
+        if (lcf->attributes == NULL) {
+            lcf->attributes = ngx_array_create(cf->pool, 8, sizeof(ngx_str_t));
+            if (lcf->attributes == NULL) {
+                goto error;
+            }
         }
-        //  Need to do something with the ASN.1 sequence
-        if (!ASN1_parse(out, (const unsigned char *) buf->data, length, 0)) {
+        if (ngx_http_est_asn1_parse(cf, (const unsigned char *) buf->data, length, conf) != 0) {
             ngx_log_error(NGX_LOG_EMERG, cf->log, 0, 
-                    "%s: error reading CSR attributes: \"%*s\"",
+                    "%s: error reading certificate attributes: \"%*s\"",
                     MODULE_NAME,
                     lcf->csr_attrs.len,
                     lcf->csr_attrs.data);
@@ -204,14 +279,12 @@ ngx_http_est_command_csr_attrs(ngx_conf_t *cf, ngx_command_t *cmd, void *conf) {
         }
     }
 
+    buf->length = length;
     lcf->buf = buf;
-    lcf->length = length;
     rv = NGX_CONF_OK;
 
 error:
     BIO_free(in);
-    BIO_free(out);
-
     if (rv != NGX_CONF_OK) {
         BUF_MEM_free(buf);
     }
@@ -229,6 +302,12 @@ ngx_http_est_command_enable(ngx_conf_t *cf, ngx_command_t *cmd, void *conf) {
     if (rv != NGX_CONF_OK) {
         return rv;
     }
+
+    /*
+        This validation check might have to move to after all configuration has been 
+        read and be executed only where the est_verify_client directive includes 
+        verification by certificate (cert or both).
+    */
 
     sscf = ngx_http_conf_get_module_srv_conf(cf, ngx_http_ssl_module);
     if (sscf->verify != /* optional */ 2) {
@@ -345,18 +424,36 @@ ngx_http_est_create_loc_conf(ngx_conf_t *cf) {
 
     /*
         set by ngx_pcalloc():
+            lcf->auth_request = { 0, NULL };
             lcf->csr_attrs = { 0, NULL };
             lcf->root_certificate = { 0, NULL };
-            lcf->uri = { 0, NULL };
     */
 
-    lcf->buf = NGX_CONF_UNSET_PTR;
     lcf->enable = NGX_CONF_UNSET;
-    lcf->length = NGX_CONF_UNSET_SIZE;
-    lcf->root = NGX_CONF_UNSET_PTR;
     lcf->verify_client = NGX_CONF_UNSET;
+    lcf->attributes = NULL;
+    lcf->buf = NGX_CONF_UNSET_PTR;
+    lcf->root = NGX_CONF_UNSET_PTR;
 
     return lcf;
+}
+
+
+static char *
+ngx_http_est_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child) {
+    ngx_http_est_loc_conf_t *prev = parent;
+    ngx_http_est_loc_conf_t *conf = child;
+    
+    ngx_conf_merge_value(conf->enable, prev->enable, 0);
+    ngx_conf_merge_str_value(conf->auth_request, prev->auth_request, "");
+    ngx_conf_merge_str_value(conf->csr_attrs, prev->csr_attrs, "");
+    ngx_conf_merge_str_value(conf->root_certificate, prev->root_certificate, "");
+    ngx_conf_merge_value(conf->verify_client, prev->verify_client, VERIFY_CERTIFICATE);
+    ngx_conf_merge_ptr_value(conf->attributes, prev->attributes, NULL);
+    ngx_conf_merge_ptr_value(conf->buf, prev->buf, NULL);
+    ngx_conf_merge_ptr_value(conf->root, prev->root, NULL);
+    
+    return NGX_CONF_OK;
 }
 
 
@@ -384,20 +481,6 @@ ngx_http_est_initialise(ngx_conf_t *cf) {
     *h = ngx_http_est_auth;
 
     return NGX_OK;
-}
-
-static char *
-ngx_http_est_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child) {
-    ngx_http_est_loc_conf_t *prev = parent;
-    ngx_http_est_loc_conf_t *conf = child;
-    
-    ngx_conf_merge_value(conf->enable, prev->enable, 0);
-    ngx_conf_merge_value(conf->verify_client, prev->verify_client, VERIFY_CERTIFICATE);
-    ngx_conf_merge_ptr_value(conf->root, prev->root, NULL);
-    ngx_conf_merge_ptr_value(conf->buf, prev->buf, NULL);
-    ngx_conf_merge_size_value(conf->length, prev->length, 0);
-    
-    return NGX_CONF_OK;
 }
 
 

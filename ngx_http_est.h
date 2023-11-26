@@ -22,15 +22,14 @@ ngx_http_est_verify_e;
 
 typedef struct {
     ngx_flag_t  enable;
+    ngx_str_t   auth_request;
     ngx_str_t   csr_attrs;
     ngx_str_t   root_certificate;
     ngx_int_t   verify_client;
-    ngx_str_t   uri;
 
-    PKCS7       *root;
+    ngx_array_t *attributes;
     BUF_MEM     *buf;
-
-    size_t      length;
+    PKCS7       *root;
 }
 ngx_http_est_loc_conf_t;
 

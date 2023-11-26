@@ -37,12 +37,18 @@ _ngx_http_est_request_body(ngx_http_request_t *r) {
 
 static void
 _ngx_http_est_request_simpleenroll(ngx_http_request_t *r) {
+    ngx_http_est_loc_conf_t *lcf;
     ngx_buf_t *buf;
     ngx_int_t rc;
     ngx_str_t data, res;
     X509_REQ *req;
 
     rc = NGX_HTTP_INTERNAL_SERVER_ERROR;
+    lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
+    if (lcf == NULL) {
+        goto error;
+    }
+
     if ((r->request_body == NULL) ||
             (r->request_body->bufs == NULL)) {
         goto error;
@@ -59,13 +65,33 @@ _ngx_http_est_request_simpleenroll(ngx_http_request_t *r) {
     if (res.data == NULL) {
         goto error;
     }
-    ngx_decode_base64(&res, &data);
-    if (d2i_X509_REQ(&req, (const unsigned char **) &res.data, res.len) == NULL) {
+    if (ngx_decode_base64(&res, &data) != NGX_OK) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                "%s: error performing base64 decoding",
+                MODULE_NAME);
+        rc = NGX_HTTP_BAD_REQUEST;
+        goto error;
+    }
+
+    req = d2i_X509_REQ(NULL, (const unsigned char **) &res.data, res.len);
+    /* req = d2i_X509_REQ(NULL, (const unsigned char **) &data.data, data.len); */
+    if (req == NULL) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                 "%s: error parsing certificate request",
                 MODULE_NAME);
         rc = NGX_HTTP_BAD_REQUEST;
         goto error;
+    }
+    /* assert(req != NULL); */
+
+    /*
+        The following code checks whether required certificate attributes are 
+        included within the submitted CSR. If any of these attributes are missing, 
+        the submitted CSR is rejected.
+    */
+
+    if ((lcf->attributes != NULL) &&
+            (lcf->attributes->nelts > 0)) {
     }
 
     rc = NGX_HTTP_NO_CONTENT;
@@ -103,8 +129,8 @@ ngx_http_est_request(ngx_http_request_t *r) {
         segments that may be employed within a configuration.
     */
 
+    /* assert(r->connection->ssl); */
     if (!r->connection->ssl) {
-//  Remove for development/debugging
 //        return NGX_HTTP_FORBIDDEN;
     }
 
@@ -151,6 +177,13 @@ ngx_http_est_request(ngx_http_request_t *r) {
         }
         if (d->verify) {
             if ((lcf->verify_client & VERIFY_CERTIFICATE) != 0) {
+                if (!r->connection->ssl) {
+                    ngx_log_error(NGX_LOG_WARN, r->connection->log, 0, 
+                            "%s: client using non-secure connection",
+                            MODULE_NAME);
+                    return NGX_HTTP_FORBIDDEN;
+                }
+
                 if (ngx_ssl_get_client_verify(r->connection, r->pool, &verify) != NGX_OK) {
                     return NGX_HTTP_INTERNAL_SERVER_ERROR;
                 }
@@ -258,8 +291,9 @@ ngx_http_est_request_csrattrs(ngx_http_request_t *r, ngx_buf_t *b) {
     r->headers_out.content_type_len = sizeof("application/csrattrs") - 1;
     ngx_str_set(&r->headers_out.content_type, "application/csrattrs");
 
-    if (lcf->length > 0) {
-        data.len = lcf->length;
+    if ((lcf->buf != NULL) &&
+            (lcf->buf->length > 0)) {
+        data.len = lcf->buf->length;
         data.data = (u_char *)lcf->buf->data;
         res.len = ngx_base64_encoded_length(data.len);
         res.data = ngx_pcalloc(r->pool, res.len + 2);

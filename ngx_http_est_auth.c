@@ -17,7 +17,7 @@ ngx_http_est_auth(ngx_http_request_t *r) {
         return NGX_OK;
     }
     lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
-    if (lcf->uri.len == 0) {
+    if (lcf->auth_request.len == 0) {
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                 "%s: missing subrequest uri", 
                 MODULE_NAME);
@@ -40,9 +40,9 @@ ngx_http_est_auth(ngx_http_request_t *r) {
 
         ngx_log_error(NGX_LOG_INFO, r->connection->log, 0, "%s: issuing subrequest for %*s",
                 MODULE_NAME,
-                lcf->uri.len,
-                lcf->uri.data);
-        if (ngx_http_subrequest(r, &lcf->uri, NULL, &sr, ps, NGX_HTTP_SUBREQUEST_WAITED) != NGX_OK) {
+                lcf->auth_request.len,
+                lcf->auth_request.data);
+        if (ngx_http_subrequest(r, &lcf->auth_request, NULL, &sr, ps, NGX_HTTP_SUBREQUEST_WAITED) != NGX_OK) {
             return NGX_ERROR;
         }
 

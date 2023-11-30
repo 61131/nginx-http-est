@@ -25,8 +25,6 @@ ngx_http_est_asn1_parse(ngx_array_t *array, const unsigned char **data, size_t l
         the OpenSSL library. 
     */
 
-    /* assert(array != NULL); */
-
     obj = NULL;
     p1 = *data;
     end = p1 + length;
@@ -44,16 +42,16 @@ ngx_http_est_asn1_parse(ngx_array_t *array, const unsigned char **data, size_t l
 
         if (val & V_ASN1_CONSTRUCTED) {
             p3 = p1 + len;
-            if ((size_t)len > length) {
+            if (len > (long)length) {
                 *data = p1;
-                return 0;
+                return -1;
             }
             if ((val == 0x21) && 
                     (len == 0)) {
                 ret = ngx_http_est_asn1_parse(array, &p1, (size_t)(end - p1), offset + (p1 - *data));
-                if (ret == 0) { 
+                if (ret < 0) { 
                     *data = p1;
-                    return 0;
+                    return -1;
                 }
                 if (p1 >= end) {
                     break;
@@ -61,9 +59,9 @@ ngx_http_est_asn1_parse(ngx_array_t *array, const unsigned char **data, size_t l
             } else {
                 while (p1 < p3) {
                     ret = ngx_http_est_asn1_parse(array, &p1, (size_t)len, offset + (p1 - *data));
-                    if (ret == 0) { 
+                    if (ret < 0) { 
                         *data = p1;
-                        return 0;
+                        return -1;
                     }
                 }
             }
@@ -74,12 +72,14 @@ ngx_http_est_asn1_parse(ngx_array_t *array, const unsigned char **data, size_t l
         else {
             if (tag == V_ASN1_OBJECT) {
                 p4 = p2;
-                if ((obj = d2i_ASN1_OBJECT(NULL, &p4, len + header)) == NULL) {
+                if (d2i_ASN1_OBJECT(&obj, &p4, len + header) == NULL) {
+                    ASN1_OBJECT_free(obj);
                     *data = p1;
-                    return 0;
+                    return -1;
                 }
                 i2t_ASN1_OBJECT(buf, sizeof(buf), obj);
                 /* assert(strlen(buf) > 0); */
+
                 attribute = ngx_array_push(array);
                 if (attribute == NULL) {
                     goto error;
@@ -89,6 +89,8 @@ ngx_http_est_asn1_parse(ngx_array_t *array, const unsigned char **data, size_t l
                 if (attribute->data == NULL) {
                     goto error;
                 }
+                (void) ngx_copy(attribute->data, buf, strlen(buf));
+
                 ASN1_OBJECT_free(obj);
             }
             p1 += len;

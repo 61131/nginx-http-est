@@ -2,6 +2,7 @@ ngx_addon_name=ngx_http_est_module
 
 DEPS="$ngx_addon_dir/ngx_http_est.h"
 SRCS="$ngx_addon_dir/ngx_http_est.c \
+    $ngx_addon_dir/ngx_http_est_asn1.c \
     $ngx_addon_dir/ngx_http_est_auth.c \
     $ngx_addon_dir/ngx_http_est_request.c"
 

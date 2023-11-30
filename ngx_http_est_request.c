@@ -14,6 +14,8 @@ static ngx_buf_t * _ngx_http_est_request_body(ngx_http_request_t *r);
 
 static void _ngx_http_est_request_error(ngx_http_request_t *r, ngx_int_t status, char *message);
 
+static X509_REQ * _ngx_http_est_request_parse_csr(ngx_http_request_t *r);
+
 static void _ngx_http_est_request_simpleenroll(ngx_http_request_t *r);
 
 
@@ -36,6 +38,73 @@ _ngx_http_est_request_body(ngx_http_request_t *r) {
     }
     return b;
 }
+
+static X509_REQ *
+_ngx_http_est_request_parse_csr(ngx_http_request_t *r) {
+    ngx_buf_t *buf;
+    BIO *b64, *mem;
+    X509_REQ *req;
+
+    req = NULL;
+    b64 = mem = NULL;
+
+    /*
+        This function is intended to validate that the Certificate Signing Request 
+        (CSR) received includes all attributes mandated by EST module location 
+        configuration. This function will return zero on success (where the CSR
+        includes all required attributes) and -1 on error.
+    */
+
+    if ((r->request_body == NULL) ||
+            (r->request_body->bufs == NULL)) {
+        _ngx_http_est_request_error(r, NGX_HTTP_BAD_REQUEST, "Missing request body");
+        return NULL;
+    }
+    buf = _ngx_http_est_request_body(r);
+    if (buf == NULL) {
+        goto error;
+    }
+
+    /*
+        The use of OpenSSL BIO functions for base64 is specifically so that invalid 
+        (non-base64 encoded) bytes in the stream, such as the "BEGIN CERTIFICATE 
+        REQUEST" header and trailer lines, are silently ignored. The presence of 
+        such bytes within the request payload causes the internal nginx base64 
+        decoding functions to abort stream processing.
+    */
+
+    mem = BIO_new_mem_buf(buf->start, ngx_buf_size(buf));
+    if (mem == NULL) {
+        goto error;
+    }
+    b64 = BIO_new(BIO_f_base64());
+    if (b64 == NULL) {
+        goto error;
+    }
+    mem = BIO_push(b64, mem);
+
+    req = NULL;
+    if (!d2i_X509_REQ_bio(mem, &req)) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                "%s: error parsing certificate request",
+                MODULE_NAME);
+        _ngx_http_est_request_error(r, NGX_HTTP_BAD_REQUEST, "Error parsing certificate request");
+        return NULL;    
+    }
+    /* assert(req != NULL); */
+
+    BIO_free_all(mem);
+    return req;
+
+error:
+    _ngx_http_est_request_error(r, NGX_HTTP_INTERNAL_SERVER_ERROR, "Internal server error");
+
+    X509_REQ_free(req);
+    BIO_free_all(mem);
+
+    return NULL;
+}
+
 
 static void
 _ngx_http_est_request_error(ngx_http_request_t *r, ngx_int_t status, char *message) {
@@ -93,77 +162,14 @@ error:
 
 static void
 _ngx_http_est_request_simpleenroll(ngx_http_request_t *r) {
-    ngx_http_est_loc_conf_t *lcf;
-    ngx_buf_t *buf;
-    ngx_uint_t i;
-    BIO *b64, *mem;
     X509_REQ *req;
 
-    lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
-    if (lcf == NULL) {
-        goto error;
-    }
-
-    if ((r->request_body == NULL) ||
-            (r->request_body->bufs == NULL)) {
-        goto error;
-    }
-    buf = _ngx_http_est_request_body(r);
-    if (buf == NULL) {
-        goto error;
-    }
-
-    /*
-        The use of OpenSSL BIO functions for base64 is specifically so that invalid 
-        (non-base64 encoded) bytes in the stream, such as the "BEGIN CERTIFICATE 
-        REQUEST" header and trailer lines, are silently ignored. The presence of 
-        such bytes within the request payload causes the internal nginx base64 
-        decoding functions to abort stream processing.
-    */
-
-    mem = BIO_new_mem_buf(buf->start, ngx_buf_size(buf));
-    if (mem == NULL) {
-        goto error;
-    }
-    b64 = BIO_new(BIO_f_base64());
-    if (b64 == NULL) {
-        goto error;
-    }
-    BIO_push(b64, mem);
-
-    req = NULL;
-    if (!d2i_X509_REQ_bio(b64, &req)) {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                "%s: error parsing certificate request",
-                MODULE_NAME);
-        _ngx_http_est_request_error(r, NGX_HTTP_BAD_REQUEST, "Error parsing certificate request");
+    req = _ngx_http_est_request_parse_csr(r);
+    if (req == NULL) {
         return;
-    }
-    /* assert(req != NULL); */
-
-    /*
-        The following code checks whether required certificate attributes are 
-        included within the submitted CSR. If any of these attributes are missing, 
-        the submitted CSR is rejected.
-    */
-
-    if ((lcf->attributes != NULL) &&
-            (lcf->attributes->nelts > 0)) {
-
-        for (i = 0; i < lcf->attributes->nelts; ++i) {
-        }
-
-        if (X509_REQ_get_attr_count(req) == 0) {
-            _ngx_http_est_request_error(r, NGX_HTTP_BAD_REQUEST, "Certificate request missing required attributes");
-            return;
-        }
     }
 
     ngx_http_finalize_request(r, NGX_HTTP_NO_CONTENT);
-    return;
-
-error:
-    _ngx_http_est_request_error(r, NGX_HTTP_INTERNAL_SERVER_ERROR, "Internal server error");
 }
 
 

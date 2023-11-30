@@ -12,8 +12,6 @@
 #include "ngx_http_est.h"
 
 
-static int ngx_http_est_asn1_parse(ngx_array_t *array, const unsigned char **data, size_t length, off_t offset);
-
 static char * ngx_http_est_command_csr_attrs(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 
 static char * ngx_http_est_command_enable(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
@@ -153,106 +151,6 @@ ngx_module_t ngx_http_est_module = {
     NULL,                               /* exit master */
     NGX_MODULE_V1_PADDING
 };
-
-
-static int
-ngx_http_est_asn1_parse(ngx_array_t *array, const unsigned char **data, size_t length, off_t offset) {
-    ASN1_OBJECT *obj;
-    ngx_str_t *attribute;
-    const unsigned char *end, *p1, *p2, *p3, *p4;
-    char buf[128];
-    int class, header, ret, tag, val;
-    long len;
-
-    /*
-        This function is intended to parse through an ASN.1 structure, identifying 
-        object identifiers contained therein. This function has been drawn from the 
-        libest library within which the corresponding function has been derived from 
-        the OpenSSL library. 
-    */
-
-    /* assert(array != NULL); */
-
-    obj = NULL;
-    p1 = *data;
-    end = p1 + length;
-    p2 = p1 - 1;
-
-    while ((p1 < end) && (p2 < p1)) {
-        p2 = p1;
-        val = ASN1_get_object(&p1, &len, &tag, &class, length);
-        if (val & 0x80) {
-            *data = p1;
-            return -1;
-        }
-        header = p1 - p2;
-        length -= header;
-
-        if (val & V_ASN1_CONSTRUCTED) {
-            p3 = p1 + len;
-            if ((size_t)len > length) {
-                *data = p1;
-                return 0;
-            }
-            if ((val == 0x21) && 
-                    (len == 0)) {
-                ret = ngx_http_est_asn1_parse(array, &p1, (size_t)(end - p1), offset + (p1 - *data));
-                if (ret == 0) { 
-                    *data = p1;
-                    return 0;
-                }
-                if (p1 >= end) {
-                    break;
-                }
-            } else {
-                while (p1 < p3) {
-                    ret = ngx_http_est_asn1_parse(array, &p1, (size_t)len, offset + (p1 - *data));
-                    if (ret == 0) { 
-                        *data = p1;
-                        return 0;
-                    }
-                }
-            }
-        }
-        else if (class != 0) {
-            p1 += len;
-        }
-        else {
-            if (tag == V_ASN1_OBJECT) {
-                p4 = p2;
-                if ((obj = d2i_ASN1_OBJECT(NULL, &p4, len + header)) == NULL) {
-                    *data = p1;
-                    return 0;
-                }
-                i2t_ASN1_OBJECT(buf, sizeof(buf), obj);
-                /* assert(strlen(buf) > 0); */
-                attribute = ngx_array_push(array);
-                if (attribute == NULL) {
-                    goto error;
-                }
-                attribute->len = strlen(buf) + 1;
-                attribute->data = ngx_pnalloc(array->pool, attribute->len);
-                if (attribute->data == NULL) {
-                    goto error;
-                }
-                ASN1_OBJECT_free(obj);
-            }
-            p1 += len;
-            if ((tag == V_ASN1_EOC) &&
-                    (class == 0)) {
-                *data = p1;
-                return 0;
-            }
-        }
-        length -= len;
-    }
-    *data = p1;
-    return 0;
-
-error:
-    ASN1_OBJECT_free(obj);
-    return -1;
-}
 
 
 static char * 

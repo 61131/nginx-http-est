@@ -115,6 +115,16 @@ See OpenSSL [asn1parse](https://www.openssl.org/docs/man1.1.1/man1/openssl-asn1p
 
 This information will be used both in the validation of CSRs received from clients and when responding to requests for CSR attributes (using an operation path of "/csrattrs") required by the EST server. The EST server does not require client authentication or authorization to respond to requests for CSR attributes.
 
+### est_permit_http
+
+* **syntax:** `est_permit_http on|off`
+* **default:** `off`
+* **content:** `location`
+
+Permits HTTP requests to be used for EST operations.
+
+While [RFC 7030](https://datatracker.ietf.org/doc/html/rfc7030) describes the use of a TLS-secured HTTP session for EST operations, the use of unsecured HTTP may be useful where a device lacks bootstrap client TLS certificates. This mode of operations is also useful to provide visibility of EST operations for development and debugging purposes.
+
 ### est_root_certificate
 
 * **syntax:** `est_root_certificate <filename>`

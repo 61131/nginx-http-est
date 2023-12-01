@@ -99,7 +99,6 @@ _ngx_http_est_request_parse_csr(ngx_http_request_t *r) {
     ngx_http_est_loc_conf_t *lcf;
     ngx_array_t attributes;
     ngx_buf_t *body;
-    ngx_str_t *s1, *s2;
     BIO *b64, *mem;
     BUF_MEM *buf;
     X509_REQ *req;
@@ -203,22 +202,20 @@ _ngx_http_est_request_parse_csr(ngx_http_request_t *r) {
     */
 
     if (lcf->attributes != NULL) {  
-        s1 = lcf->attributes->elts;
         for (i = 0; i < lcf->attributes->nelts; ++i) {
             ret = -1;
-            s2 = attributes.elts;
             for (j = 0; j < attributes.nelts; ++j) {
-                ret = ngx_strcmp(s1[i].data, s2[j].data);
-                if (ret == 0) {
+                if ((ret = ngx_strcmp(((ngx_str_t *)lcf->attributes->elts)[i].data,
+                        ((ngx_str_t *)attributes.elts)[j].data)) == 0) {
                     break;
                 }
             }
-            if (/* j >= attributes.nelts */ ret != 0) {
+            if (ret != 0) {
                 ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                         "%s: certificate signing request missing mandatory attribute: \"%*s\"",
                         MODULE_NAME,
-                        s1[i].len,
-                        s1[i].data);
+                        ((ngx_str_t *)lcf->attributes->elts)[i].len,
+                        ((ngx_str_t *)lcf->attributes->elts)[i].data);
                 _ngx_http_est_request_error(r, NGX_HTTP_BAD_REQUEST, "Certificate signing request missing mandatory attribute");
 
                 X509_REQ_free(req);

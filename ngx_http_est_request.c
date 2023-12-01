@@ -96,11 +96,14 @@ error:
 
 static X509_REQ *
 _ngx_http_est_request_parse_csr(ngx_http_request_t *r) {
-    ngx_array_t array;
+    ngx_http_est_loc_conf_t *lcf;
+    ngx_array_t attributes;
     ngx_buf_t *body;
+    ngx_str_t *s1, *s2;
     BIO *b64, *mem;
     BUF_MEM *buf;
     X509_REQ *req;
+    ngx_uint_t i, j;
     size_t length;
     char *pp;
     int ret;
@@ -108,6 +111,11 @@ _ngx_http_est_request_parse_csr(ngx_http_request_t *r) {
     req = NULL;
     b64 = mem = NULL;
     buf = NULL;
+
+    lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
+    if (lcf == NULL) {
+        goto error;
+    }
 
     /*
         This function is intended to validate that the Certificate Signing Request 
@@ -150,11 +158,12 @@ _ngx_http_est_request_parse_csr(ngx_http_request_t *r) {
                 "%s: error parsing certificate request",
                 MODULE_NAME);
         _ngx_http_est_request_error(r, NGX_HTTP_BAD_REQUEST, "Error parsing certificate request");
-        return NULL;    
+
+        X509_REQ_free(req);
+        goto finish;
     }
     /* assert(req != NULL); */
 
-    /* BIO_seek(mem, 0); */
     BIO_reset(mem);
     if ((buf = BUF_MEM_new()) == NULL) {
         goto error;
@@ -171,15 +180,54 @@ _ngx_http_est_request_parse_csr(ngx_http_request_t *r) {
     }
 
     pp = buf->data;
-    ngx_array_init(&array, r->pool, 8, sizeof(ngx_str_t));
-    if (ngx_http_est_asn1_parse(&array, (const unsigned char **) &pp, length, 0) != 0) {
+    ngx_array_init(&attributes, r->pool, 8, sizeof(ngx_str_t));
+    if (ngx_http_est_asn1_parse(&attributes, (const unsigned char **) &pp, length, 0) != 0) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                 "%s: error parsing certificate attributes",
                 MODULE_NAME);
         _ngx_http_est_request_error(r, NGX_HTTP_BAD_REQUEST, "Error parsing certificate attributes");
-        return NULL;
+
+        X509_REQ_free(req);
+        goto finish;
     }
 
+    /*
+        If there are mandatory attributes defined for certificate signing requests, 
+        the submitted signing request will be validated with respect to the 
+        inclusion of these attributes. It is noted that this is an O(n*m) operation, 
+        but that this performance should be acceptable given the pre-parsing of 
+        attributes from the ASN.1 certificate byte sequence.
+
+        The lcf->attributes is only defined if the est_csr_attrs directive is
+        included in the location directive.
+    */
+
+    if (lcf->attributes != NULL) {  
+        s1 = lcf->attributes->elts;
+        for (i = 0; i < lcf->attributes->nelts; ++i) {
+            ret = -1;
+            s2 = attributes.elts;
+            for (j = 0; j < attributes.nelts; ++j) {
+                ret = ngx_strcmp(s1[i].data, s2[j].data);
+                if (ret == 0) {
+                    break;
+                }
+            }
+            if (/* j >= attributes.nelts */ ret != 0) {
+                ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                        "%s: certificate signing request missing mandatory attribute: \"%*s\"",
+                        MODULE_NAME,
+                        s1[i].len,
+                        s1[i].data);
+                _ngx_http_est_request_error(r, NGX_HTTP_BAD_REQUEST, "Certificate signing request missing mandatory attribute");
+
+                X509_REQ_free(req);
+                goto finish;
+            }
+        }
+    }
+
+finish:
     BUF_MEM_free(buf);
     BIO_free_all(mem);
 

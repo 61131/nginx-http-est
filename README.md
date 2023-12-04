@@ -63,9 +63,9 @@ Note that the nginx-http-est module is dependent upon the HTTP SSL module for no
 
 The configuration directives and parameters associated with this module may broadly be divided into those which specify EST server behaviour and those which specify behaviour of the underlying CA.
 
-### EST Server Parameters
+#### EST Server Parameters
 
-#### est
+### est
 
 * **syntax:** `est on|off`
 * **default:** `off`
@@ -83,7 +83,7 @@ An EST server may also support service for multiple CAs as indicated by an optio
 
 This configuration can be supported by this module through the inclusion of multiple location directives within the server configuration.
 
-#### est_auth_request
+### est_auth_request
 
 * **syntax:** `est_auth_request <uri>`
 * **default:** `none`
@@ -145,7 +145,7 @@ If TLS certificate validation is configured, the client certificate is verified 
 
 For HTTP-based authentication, the `est_auth_request` directive must be set with the URI location against which subrquests are issued to determine whether the given client is authorized.
 
-### Certificate Authority Parameters
+#### Certificate Authority Parameters
 
 ### est_ca_default_days
 

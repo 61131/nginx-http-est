@@ -101,6 +101,7 @@ _ngx_http_est_request_parse_csr(ngx_http_request_t *r) {
     ngx_buf_t *body;
     BIO *b64, *mem;
     BUF_MEM *buf;
+    EVP_PKEY *pkey;
     X509_REQ *req;
     ngx_uint_t i, j;
     size_t length;
@@ -108,6 +109,7 @@ _ngx_http_est_request_parse_csr(ngx_http_request_t *r) {
     int ret;
 
     req = NULL;
+    pkey = NULL;
     b64 = mem = NULL;
     buf = NULL;
 
@@ -162,6 +164,17 @@ _ngx_http_est_request_parse_csr(ngx_http_request_t *r) {
         goto finish;
     }
     /* assert(req != NULL); */
+    if (((pkey = X509_REQ_get0_pubkey(req)) == NULL) ||
+            (!X509_REQ_verify(req, pkey))) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                "%s: error verifying certificate request",
+                MODULE_NAME);
+        _ngx_http_est_request_error(r, NGX_HTTP_BAD_REQUEST, "Error verifying certificate request");
+
+        EVP_PKEY_free(pkey);
+        X509_REQ_free(req);
+        goto finish;
+    }
 
     BIO_reset(mem);
     if ((buf = BUF_MEM_new()) == NULL) {
@@ -226,6 +239,7 @@ _ngx_http_est_request_parse_csr(ngx_http_request_t *r) {
 
 finish:
     BUF_MEM_free(buf);
+    EVP_PKEY_free(pkey);
     BIO_free_all(mem);
 
     return req;
@@ -234,6 +248,7 @@ error:
     _ngx_http_est_request_error(r, NGX_HTTP_INTERNAL_SERVER_ERROR, "Internal server error");
 
     BUF_MEM_free(buf);
+    EVP_PKEY_free(pkey);
     X509_REQ_free(req);
     BIO_free_all(mem);
 

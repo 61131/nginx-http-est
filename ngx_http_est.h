@@ -21,11 +21,15 @@ typedef enum {
 ngx_http_est_verify_e;
 
 typedef struct {
-    ngx_flag_t  enable;
     ngx_str_t   auth_request;
+    ngx_int_t   ca_default_days;
+    ngx_flag_t  ca_preserve_dates;
+    ngx_str_t   ca_private_key;
+    ngx_str_t   ca_root_certificate;
+    ngx_str_t   ca_serial_number;
     ngx_str_t   csr_attrs;
+    ngx_flag_t  enable;
     ngx_flag_t  permit_http;
-    ngx_str_t   root_certificate;
     ngx_int_t   verify_client;
 
     ngx_array_t *attributes;

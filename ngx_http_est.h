@@ -7,6 +7,7 @@
 
 #include <openssl/buffer.h>
 #include <openssl/pkcs7.h>
+#include <openssl/x509.h>
 
 
 #define MODULE_NAME     ("est")
@@ -23,7 +24,6 @@ ngx_http_est_verify_e;
 typedef struct {
     ngx_str_t   auth_request;
     ngx_int_t   ca_default_days;
-    ngx_flag_t  ca_preserve_dates;
     ngx_str_t   ca_private_key;
     ngx_str_t   ca_root_certificate;
     ngx_str_t   ca_serial_number;
@@ -32,8 +32,11 @@ typedef struct {
     ngx_flag_t  permit_http;
     ngx_int_t   verify_client;
 
+    /* array(ngx_str_t) CSR attributes */
     ngx_array_t *attributes;
+    /* BUF_MEM CSR attributes, DER encoded */
     BUF_MEM     *buf;
+    /* PKCS7 root certificate */
     PKCS7       *root;
 }
 ngx_http_est_loc_conf_t;
@@ -66,6 +69,11 @@ ngx_int_t ngx_http_est_request(ngx_http_request_t *r);
 ngx_int_t ngx_http_est_request_cacerts(ngx_http_request_t *r, ngx_buf_t *b);
 ngx_int_t ngx_http_est_request_csrattrs(ngx_http_request_t *r, ngx_buf_t *b);
 ngx_int_t ngx_http_est_request_simpleenroll(ngx_http_request_t *r, ngx_buf_t *b);
+ngx_int_t ngx_http_est_request_simplereenroll(ngx_http_request_t *r, ngx_buf_t *b);
+X509 * ngx_http_est_x509_cacert(ngx_http_request_t *r);
+X509 * ngx_http_est_x509_generate(ngx_http_request_t *r, X509_REQ *req);
+EVP_PKEY * ngx_http_est_x509_privkey(ngx_http_request_t *r);
+ngx_int_t ngx_http_est_x509_verify(X509_REQ *req);
 
 
 #endif  /* _NGX_HTTP_EST_H_INCLUDED_ */

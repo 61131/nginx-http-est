@@ -11,11 +11,8 @@
 
 
 static ngx_buf_t * _ngx_http_est_request_body(ngx_http_request_t *r);
-
 static void _ngx_http_est_request_error(ngx_http_request_t *r, ngx_int_t status, char *message);
-
 static X509_REQ * _ngx_http_est_request_parse_csr(ngx_http_request_t *r);
-
 static void _ngx_http_est_request_simpleenroll(ngx_http_request_t *r);
 
 
@@ -24,6 +21,12 @@ _ngx_http_est_request_body(ngx_http_request_t *r) {
     ngx_buf_t *b;
     ngx_chain_t *in;
     size_t len;
+
+    /*
+        This function is intended to return the HTTP request body in a single buffer 
+        for subsequent processing operations. Returns pointer to ngx_buf_t structure
+        on success, NULL on failure.
+    */
 
     len = 0;
     for (in = r->request_body->bufs; in; in = in->next) {
@@ -164,14 +167,12 @@ _ngx_http_est_request_parse_csr(ngx_http_request_t *r) {
         goto finish;
     }
     /* assert(req != NULL); */
-    if (((pkey = X509_REQ_get0_pubkey(req)) == NULL) ||
-            (!X509_REQ_verify(req, pkey))) {
+    if (!ngx_http_est_x509_verify(req)) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                 "%s: error verifying certificate request",
                 MODULE_NAME);
         _ngx_http_est_request_error(r, NGX_HTTP_BAD_REQUEST, "Error verifying certificate request");
 
-        EVP_PKEY_free(pkey);
         X509_REQ_free(req);
         goto finish;
     }
@@ -210,7 +211,7 @@ _ngx_http_est_request_parse_csr(ngx_http_request_t *r) {
         but that this performance should be acceptable given the pre-parsing of 
         attributes from the ASN.1 certificate byte sequence.
 
-        The lcf->attributes is only defined if the est_csr_attrs directive is
+        Note that lcf->attributes is only defined if the est_csr_attrs directive is
         included in the location directive.
     */
 
@@ -259,10 +260,24 @@ error:
 static void
 _ngx_http_est_request_simpleenroll(ngx_http_request_t *r) {
     X509_REQ *req;
+    X509 *cert;
+
+    /*
+        This function implements handling for HTTP request bodies submitted to the 
+        EST API end-point for certificate generation. This is performed by reading 
+        and parsing the Certificate Signing Request (CSR) contained in the request 
+        body, validating this as per local configuration and generating the new 
+        certificate from the back-end certificate authority.
+    */
 
     req = _ngx_http_est_request_parse_csr(r);
     if (req == NULL) {
         return;
+    }
+
+    cert = ngx_http_est_x509_generate(r, req);
+    if (cert != NULL) {
+        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0, "ngx_http_est_x509_generate != NULL");
     }
 
     ngx_http_finalize_request(r, NGX_HTTP_NO_CONTENT);
@@ -288,7 +303,6 @@ ngx_http_est_request(ngx_http_request_t *r) {
     if (clcf == NULL) {
         return NGX_DECLINED;
     }
-
 
     /*
         This function implements handling for HTTP requests submitted to the EST API 
@@ -511,4 +525,21 @@ ngx_http_est_request_simpleenroll(ngx_http_request_t *r, ngx_buf_t *b) {
     return NGX_OK;
 }
 
+
+ngx_int_t
+ngx_http_est_request_simplereenroll(ngx_http_request_t *r, ngx_buf_t *b) {
+    ngx_str_t value;
+
+    /* assert(r->method == NGX_HTTP_POST); */
+    if ((r->headers_in.content_type == NULL) ||
+            (r->headers_in.content_type->value.data == NULL)) {
+        return NGX_HTTP_BAD_REQUEST;
+    }
+    value = r->headers_in.content_type->value;
+    if (ngx_strcasecmp(value.data, (u_char *) "application/pkcs10") != 0) {
+        return NGX_HTTP_BAD_REQUEST;
+    }
+
+    return NGX_OK;
+}
 

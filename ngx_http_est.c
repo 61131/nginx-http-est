@@ -13,55 +13,41 @@
 
 
 static char * ngx_http_est_command_csr_attrs(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
-
 static char * ngx_http_est_command_enable(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
-
 static char * ngx_http_est_command_root_certificate(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
-
 static void * ngx_http_est_create_loc_conf(ngx_conf_t *cf);
-
 static char * ngx_http_est_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child);
-
 static ngx_int_t ngx_http_est_initialise(ngx_conf_t *cf);
 
 
 ngx_http_est_dispatch_t ngx_http_est_dispatch[] = {
 
-    /*
-        4.1.2. CA Certificates Request
-
-        EST clients request the EST CA TA database information of the CA (in the 
-        form of certificates) with an HTTPS GET message using an operation path of 
-        "/cacerts". 
-    */
+    /* 4.1.2 CA Certificates Request */
 
     { ngx_string("cacerts"),
         NGX_HTTP_GET,
         0,
         ngx_http_est_request_cacerts },
 
-    /*
-        4.2. Client Certificate Request Functions
-
-        EST clients request a certificate from the EST server with an HTTPS POST 
-        using the operation path value of "/simpleenroll".  EST clients request a 
-        renew/rekey of existing certificates with an HTTP POST using the operation 
-        path value of "/simplereenroll". EST servers MUST support the /simpleenroll 
-        and /simplereenroll functions.
-    */
+    /* 4.2.1 Simple Enrollment of Clients */
 
     { ngx_string("simpleenroll"),
         NGX_HTTP_POST,
         1,
         ngx_http_est_request_simpleenroll },
 
-    /*
-        4.5.1. CSR Attributes Request
+    /* 4.2.2 Simple Re-enrollment of Clients */
 
-        The EST client requests a list of CA-desired CSR attributes from the CA by
-        sending an HTTPS GET message to the EST server with an operations path of
-        "/csrattrs".
-    */
+    { ngx_string("simplereenroll"),
+        NGX_HTTP_POST,
+        1,
+        ngx_http_est_request_simplereenroll },
+
+    /* 4.3.1 Full CMC Request */
+
+    /* 4.4.1 Server-Side Key Generation Request */
+
+    /* 4.5.1 CSR Attributes Request */
 
     { ngx_string("csrattrs"),
         NGX_HTTP_GET,
@@ -102,13 +88,6 @@ static ngx_command_t ngx_http_est_commands[] = {
         offsetof(ngx_http_est_loc_conf_t, ca_default_days),
         NULL },
 
-    { ngx_string("est_ca_preserve_dates"),
-        NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
-        ngx_conf_set_flag_slot,
-        NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_est_loc_conf_t, ca_preserve_dates),
-        NULL },
-
     { ngx_string("est_ca_private_key"),
         NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
         ngx_conf_set_str_slot,
@@ -142,6 +121,13 @@ static ngx_command_t ngx_http_est_commands[] = {
         ngx_conf_set_flag_slot,
         NGX_HTTP_LOC_CONF_OFFSET,
         offsetof(ngx_http_est_loc_conf_t, permit_http),
+        NULL },
+
+    { ngx_string("est_root_certificate"),
+        NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_http_est_command_root_certificate,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_est_loc_conf_t, ca_root_certificate),
         NULL },
 
     { ngx_string("est_verify_client"),
@@ -260,7 +246,6 @@ error:
 
 static char * 
 ngx_http_est_command_enable(ngx_conf_t *cf, ngx_command_t *cmd, void *conf) {
-    ngx_http_ssl_srv_conf_t *sscf;
     ngx_http_core_loc_conf_t *clcf;
     char *rv;
 
@@ -269,20 +254,6 @@ ngx_http_est_command_enable(ngx_conf_t *cf, ngx_command_t *cmd, void *conf) {
         return rv;
     }
 
-    /*
-        This validation check might have to move to after all configuration has been 
-        read and be executed only where the est_verify_client directive includes 
-        verification by certificate (cert or both).
-    */
-
-    sscf = ngx_http_conf_get_module_srv_conf(cf, ngx_http_ssl_module);
-    if (sscf->verify != /* optional */ 2) {
-        ngx_log_error(NGX_LOG_EMERG, cf->log, 0,
-                "%s: ssl_verify_client must be set to \"optional\"",
-                MODULE_NAME);
-        return NGX_CONF_ERROR;
-    }
- 
     clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
     clcf->handler = ngx_http_est_request;
     return NGX_CONF_OK;
@@ -398,7 +369,6 @@ ngx_http_est_create_loc_conf(ngx_conf_t *cf) {
     */
 
     lcf->ca_default_days = NGX_CONF_UNSET;
-    lcf->ca_preserve_dates = NGX_CONF_UNSET;
     lcf->enable = NGX_CONF_UNSET;
     lcf->permit_http = NGX_CONF_UNSET;
     lcf->verify_client = NGX_CONF_UNSET;
@@ -417,7 +387,6 @@ ngx_http_est_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child) {
     
     ngx_conf_merge_str_value(conf->auth_request, prev->auth_request, "");
     ngx_conf_merge_value(conf->ca_default_days, prev->ca_default_days, 30);
-    ngx_conf_merge_value(conf->ca_preserve_dates, prev->ca_preserve_dates, 0);
     ngx_conf_merge_str_value(conf->ca_private_key, prev->ca_private_key, "");
     ngx_conf_merge_str_value(conf->ca_root_certificate, prev->ca_root_certificate, "");
     ngx_conf_merge_str_value(conf->ca_serial_number, prev->ca_serial_number, "");
@@ -439,14 +408,9 @@ ngx_http_est_initialise(ngx_conf_t *cf) {
     ngx_http_handler_pt *h;
 
     /*
-        TODO: Add checks to ensure that all configuration requirements for EST 
-        operations have been fulfiled.
-    */
-
-    /*
         The following installs this module as an access handler for HTTP requests. 
-        This will be used to selectively perform authorization checks depending upon 
-        the client verification configuration in place for a given location.
+        This will be used to selectively perform HTTP authorization checks depending 
+        upon the client verification configuration in place for a given location.
     */
 
     cmcf = ngx_http_conf_get_module_main_conf(cf, ngx_http_core_module);

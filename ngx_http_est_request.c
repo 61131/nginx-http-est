@@ -11,9 +11,12 @@
 
 
 static ngx_buf_t * _ngx_http_est_request_body(ngx_http_request_t *r);
+
 static void _ngx_http_est_request_error(ngx_http_request_t *r, ngx_int_t status, char *message);
+
 static X509_REQ * _ngx_http_est_request_parse_csr(ngx_http_request_t *r);
-static void _ngx_http_est_request_simpleenroll(ngx_http_request_t *r);
+
+static void _ngx_http_est_request_simple(ngx_http_request_t *r);
 
 
 static ngx_buf_t *
@@ -258,7 +261,7 @@ error:
 
 
 static void
-_ngx_http_est_request_simpleenroll(ngx_http_request_t *r) {
+_ngx_http_est_request_simple(ngx_http_request_t *r) {
     X509_REQ *req;
     X509 *cert;
 
@@ -463,7 +466,7 @@ error:
 ngx_int_t 
 ngx_http_est_request_csrattrs(ngx_http_request_t *r, ngx_buf_t *b) {
     ngx_http_est_loc_conf_t *lcf;
-    ngx_str_t data, res;
+    ngx_str_t str, res;
 
     lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
     if (lcf == NULL) {
@@ -476,14 +479,14 @@ ngx_http_est_request_csrattrs(ngx_http_request_t *r, ngx_buf_t *b) {
 
     if ((lcf->buf != NULL) &&
             (lcf->buf->length > 0)) {
-        data.len = lcf->buf->length;
-        data.data = (u_char *)lcf->buf->data;
-        res.len = ngx_base64_encoded_length(data.len);
+        str.len = lcf->buf->length;
+        str.data = (u_char *)lcf->buf->data;
+        res.len = ngx_base64_encoded_length(str.len);
         res.data = ngx_pcalloc(r->pool, res.len + 2);
         if (res.data == NULL) {
             return NGX_ERROR;
         }
-        ngx_encode_base64(&res, &data);
+        ngx_encode_base64(&res, &str);
         b->pos = b->last = res.data;
         b->memory = 1;
         b->last += res.len;
@@ -497,7 +500,13 @@ ngx_http_est_request_csrattrs(ngx_http_request_t *r, ngx_buf_t *b) {
 
 
 ngx_int_t 
-ngx_http_est_request_simpleenroll(ngx_http_request_t *r, ngx_buf_t *b) {
+ngx_http_est_request_not_implemented(ngx_http_request_t *r, ngx_buf_t *b) {
+    return NGX_HTTP_NOT_IMPLEMENTED;
+}
+
+
+ngx_int_t 
+ngx_http_est_request_simple_request(ngx_http_request_t *r, ngx_buf_t *b) {
     ngx_str_t value;
     ngx_int_t rc;
 
@@ -505,7 +514,7 @@ ngx_http_est_request_simpleenroll(ngx_http_request_t *r, ngx_buf_t *b) {
         This function will process the request headers before establishing a 
         callback handler to processing the request body which is expected to 
         contain the certificate signing request (CSR) associated with the 
-        /simpleenroll request.
+        /simpleenroll or /simplereenroll request.
     */
 
     /* assert(r->method == NGX_HTTP_POST); */
@@ -518,28 +527,11 @@ ngx_http_est_request_simpleenroll(ngx_http_request_t *r, ngx_buf_t *b) {
         return NGX_HTTP_BAD_REQUEST;
     }
 
-    rc = ngx_http_read_client_request_body(r, _ngx_http_est_request_simpleenroll);
+    rc = ngx_http_read_client_request_body(r, _ngx_http_est_request_simple);
     if (rc >= NGX_HTTP_SPECIAL_RESPONSE) {
         return rc;
     }
     return NGX_OK;
 }
 
-
-ngx_int_t
-ngx_http_est_request_simplereenroll(ngx_http_request_t *r, ngx_buf_t *b) {
-    ngx_str_t value;
-
-    /* assert(r->method == NGX_HTTP_POST); */
-    if ((r->headers_in.content_type == NULL) ||
-            (r->headers_in.content_type->value.data == NULL)) {
-        return NGX_HTTP_BAD_REQUEST;
-    }
-    value = r->headers_in.content_type->value;
-    if (ngx_strcasecmp(value.data, (u_char *) "application/pkcs10") != 0) {
-        return NGX_HTTP_BAD_REQUEST;
-    }
-
-    return NGX_OK;
-}
 

@@ -106,6 +106,9 @@ ngx_http_est_auth_required(ngx_http_request_t *r) {
     u_char *ptr, *uri;
 
     lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
+    if (lcf->enable == 0) {
+        return 0;
+    }
     if ((lcf->verify_client & VERIFY_AUTHENTICATION) == 0) {
         return 0;
     }

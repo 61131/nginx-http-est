@@ -13,10 +13,15 @@
 
 
 static char * ngx_http_est_command_csr_attrs(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+
 static char * ngx_http_est_command_enable(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+
 static char * ngx_http_est_command_root_certificate(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+
 static void * ngx_http_est_create_loc_conf(ngx_conf_t *cf);
+
 static char * ngx_http_est_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child);
+
 static ngx_int_t ngx_http_est_initialise(ngx_conf_t *cf);
 
 
@@ -34,18 +39,28 @@ ngx_http_est_dispatch_t ngx_http_est_dispatch[] = {
     { ngx_string("simpleenroll"),
         NGX_HTTP_POST,
         1,
-        ngx_http_est_request_simpleenroll },
+        ngx_http_est_request_simple_request },
 
     /* 4.2.2 Simple Re-enrollment of Clients */
 
     { ngx_string("simplereenroll"),
         NGX_HTTP_POST,
         1,
-        ngx_http_est_request_simplereenroll },
+        ngx_http_est_request_simple_request },
 
     /* 4.3.1 Full CMC Request */
 
+    { ngx_string("fullcmc"),
+        NGX_HTTP_POST,
+        1,
+        ngx_http_est_request_not_implemented },
+
     /* 4.4.1 Server-Side Key Generation Request */
+
+    { ngx_string("serverkeygen"),
+        NGX_HTTP_POST,
+        1,
+        ngx_http_est_request_not_implemented },
 
     /* 4.5.1 CSR Attributes Request */
 
@@ -63,10 +78,14 @@ static ngx_conf_enum_t ngx_http_est_client_verify[] = {
     { ngx_string("auth"), VERIFY_AUTHENTICATION }, 
     { ngx_string("cert"), VERIFY_CERTIFICATE },
     { ngx_string("both"), VERIFY_BOTH }, 
+ /* { ngx_string("any"), VERIFY_ANY }, */
     { ngx_null_string, 0 },
 };
 
 static ngx_command_t ngx_http_est_commands[] = {
+
+    /* Directives associated with EST operations */
+
     { ngx_string("est"),
         NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
         ngx_http_est_command_enable,
@@ -79,34 +98,6 @@ static ngx_command_t ngx_http_est_commands[] = {
         ngx_conf_set_str_slot,
         NGX_HTTP_LOC_CONF_OFFSET,
         offsetof(ngx_http_est_loc_conf_t, auth_request),
-        NULL },
-
-    { ngx_string("est_ca_default_days"),
-        NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_conf_set_num_slot,
-        NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_est_loc_conf_t, ca_default_days),
-        NULL },
-
-    { ngx_string("est_ca_private_key"),
-        NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_conf_set_str_slot,
-        NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_est_loc_conf_t, ca_private_key),
-        NULL },
-
-    { ngx_string("est_ca_root_certificate"),
-        NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_http_est_command_root_certificate,
-        NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_est_loc_conf_t, ca_root_certificate),
-        NULL },
-
-    { ngx_string("est_ca_serial_number"),
-        NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_conf_set_str_slot,
-        NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_est_loc_conf_t, ca_serial_number),
         NULL },
 
     { ngx_string("est_csr_attrs"),
@@ -136,6 +127,36 @@ static ngx_command_t ngx_http_est_commands[] = {
         NGX_HTTP_LOC_CONF_OFFSET,
         offsetof(ngx_http_est_loc_conf_t, verify_client),
         &ngx_http_est_client_verify },
+
+    /* Directives associated with CA operations */
+
+    { ngx_string("est_ca_private_key"),
+        NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_conf_set_str_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_est_loc_conf_t, ca_private_key),
+        NULL },
+
+    { ngx_string("est_ca_root_certificate"),
+        NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_http_est_command_root_certificate,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_est_loc_conf_t, ca_root_certificate),
+        NULL },
+
+    { ngx_string("est_ca_serial_number"),
+        NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_conf_set_str_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_est_loc_conf_t, ca_serial_number),
+        NULL },
+
+    { ngx_string("est_ca_validity_days"),
+        NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_conf_set_num_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_est_loc_conf_t, ca_validity_days),
+        NULL },
 
     ngx_null_command
 };
@@ -176,6 +197,7 @@ ngx_http_est_command_csr_attrs(ngx_conf_t *cf, ngx_command_t *cmd, void *conf) {
     char *pp, *rv;
     int ret;
 
+    /* assert(lcf != NULL); */
     rv = ngx_conf_set_str_slot(cf, cmd, conf);
     if (rv != NGX_CONF_OK) {
         return rv;
@@ -246,16 +268,20 @@ error:
 
 static char * 
 ngx_http_est_command_enable(ngx_conf_t *cf, ngx_command_t *cmd, void *conf) {
+    ngx_http_est_loc_conf_t *lcf = conf;
     ngx_http_core_loc_conf_t *clcf;
     char *rv;
 
+    /* assert(lcf != NULL); */
     rv = ngx_conf_set_flag_slot(cf, cmd, conf);
     if (rv != NGX_CONF_OK) {
         return rv;
     }
 
-    clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
-    clcf->handler = ngx_http_est_request;
+    if (lcf->enable) {
+        clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
+        clcf->handler = ngx_http_est_request;
+    }
     return NGX_CONF_OK;
 }
 
@@ -272,6 +298,7 @@ ngx_http_est_command_root_certificate(ngx_conf_t *cf, ngx_command_t *cmd, void *
     ngx_uint_t c;
     char *rv;
 
+    /* assert(lcf != NULL); */
     rv = ngx_conf_set_str_slot(cf, cmd, conf);
     if (rv != NGX_CONF_OK) {
         return rv;
@@ -368,13 +395,15 @@ ngx_http_est_create_loc_conf(ngx_conf_t *cf) {
             lcf->csr_attrs = { 0, NULL };
     */
 
-    lcf->ca_default_days = NGX_CONF_UNSET;
+    lcf->ca_validity_days = NGX_CONF_UNSET;
     lcf->enable = NGX_CONF_UNSET;
     lcf->permit_http = NGX_CONF_UNSET;
     lcf->verify_client = NGX_CONF_UNSET;
     lcf->attributes = NULL;
     lcf->buf = NGX_CONF_UNSET_PTR;
     lcf->root = NGX_CONF_UNSET_PTR;
+    lcf->x509 = NGX_CONF_UNSET_PTR;
+    lcf->pkey = NGX_CONF_UNSET_PTR;
 
     return lcf;
 }
@@ -386,10 +415,10 @@ ngx_http_est_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child) {
     ngx_http_est_loc_conf_t *conf = child;
     
     ngx_conf_merge_str_value(conf->auth_request, prev->auth_request, "");
-    ngx_conf_merge_value(conf->ca_default_days, prev->ca_default_days, 30);
     ngx_conf_merge_str_value(conf->ca_private_key, prev->ca_private_key, "");
     ngx_conf_merge_str_value(conf->ca_root_certificate, prev->ca_root_certificate, "");
     ngx_conf_merge_str_value(conf->ca_serial_number, prev->ca_serial_number, "");
+    ngx_conf_merge_value(conf->ca_validity_days, prev->ca_validity_days, 30);
     ngx_conf_merge_str_value(conf->csr_attrs, prev->csr_attrs, "");
     ngx_conf_merge_value(conf->enable, prev->enable, 0);
     ngx_conf_merge_value(conf->permit_http, prev->permit_http, 0);
@@ -397,6 +426,8 @@ ngx_http_est_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child) {
     ngx_conf_merge_ptr_value(conf->attributes, prev->attributes, NULL);
     ngx_conf_merge_ptr_value(conf->buf, prev->buf, NULL);
     ngx_conf_merge_ptr_value(conf->root, prev->root, NULL);
+    ngx_conf_merge_ptr_value(conf->x509, prev->x509, NULL);
+    ngx_conf_merge_ptr_value(conf->pkey, prev->pkey, NULL);
     
     return NGX_CONF_OK;
 }

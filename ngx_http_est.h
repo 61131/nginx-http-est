@@ -30,7 +30,7 @@ typedef struct {
     ngx_int_t   ca_validity_days;
     ngx_str_t   csr_attrs;
     ngx_flag_t  enable;
-    ngx_flag_t  permit_http;
+    ngx_flag_t  http;
     ngx_int_t   verify_client;
 
     /* array(ngx_str_t) CSR attributes */

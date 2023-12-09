@@ -382,7 +382,7 @@ ngx_http_est_request(ngx_http_request_t *r) {
     */
 
     if ((!r->connection->ssl) &&
-            (!lcf->permit_http)) {
+            (!lcf->http)) {
         return NGX_HTTP_FORBIDDEN;
     }
 

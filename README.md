@@ -174,9 +174,9 @@ For example, the following asn1.cnf file describes the requirement for a MAC add
 
 This information will be used both in the validation of CSRs received from clients and when responding to requests for CSR attributes (using an operation path of "/csrattrs") required by the EST server. The EST server does not require client authentication or authorization to respond to requests for CSR attributes.
 
-### est_permit_http
+### est_http
 
-* **syntax:** `est_permit_http on|off`
+* **syntax:** `est_http on|off`
 * **default:** `off`
 * **content:** `location`
 

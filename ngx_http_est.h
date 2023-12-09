@@ -5,6 +5,7 @@
 #include <ngx_core.h>
 #include <ngx_http.h>
 
+#include <openssl/bio.h>
 #include <openssl/buffer.h>
 #include <openssl/pkcs7.h>
 #include <openssl/x509.h>
@@ -78,6 +79,8 @@ ngx_int_t ngx_http_est_auth(ngx_http_request_t *r);
 ngx_int_t ngx_http_est_auth_required(ngx_http_request_t *r);
 
 ngx_int_t ngx_http_est_auth_response(ngx_http_request_t *r, void *data, ngx_int_t rc);
+
+PKCS7 * ngx_http_est_pkcs7(BIO *bp);
 
 ngx_int_t ngx_http_est_request(ngx_http_request_t *r);
 

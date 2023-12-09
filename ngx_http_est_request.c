@@ -249,7 +249,8 @@ finish:
     return req;
 
 error:
-    _ngx_http_est_request_error(r, NGX_HTTP_INTERNAL_SERVER_ERROR, "Internal server error");
+    _ngx_http_est_request_error(r, NGX_HTTP_INTERNAL_SERVER_ERROR, 
+            "Internal server error");
 
     BUF_MEM_free(buf);
     EVP_PKEY_free(pkey);
@@ -262,8 +263,15 @@ error:
 
 static void
 _ngx_http_est_request_simple(ngx_http_request_t *r) {
+    BIO *pem, *pkcs7;
+    BUF_MEM *ptr;
+    PKCS7 *p7;
     X509_REQ *req;
     X509 *cert;
+    ngx_buf_t *b;
+    ngx_chain_t out;
+    ngx_int_t rc;
+    u_char *content;
 
     /*
         This function implements handling for HTTP request bodies submitted to the 
@@ -273,17 +281,75 @@ _ngx_http_est_request_simple(ngx_http_request_t *r) {
         certificate from the back-end certificate authority.
     */
 
-    req = _ngx_http_est_request_parse_csr(r);
-    if (req == NULL) {
+    rc = NGX_HTTP_BAD_REQUEST;
+    pem = pkcs7 = NULL;
+    cert = NULL;
+    p7 = NULL;
+
+    if ((req = _ngx_http_est_request_parse_csr(r)) == NULL) {
+        goto error;
+    }
+    if ((cert = ngx_http_est_x509_generate(r, req)) == NULL) {
+        goto error;
+    }
+
+    /*
+        The following code will write the newly generated certificate into a memory 
+        buffer in a PEM format which in turn is then read in in a pkcs7 format.
+    */
+
+    if (((pem = BIO_new(BIO_s_mem())) == NULL) ||
+            (!PEM_write_bio_X509(pem, cert))) {
+        goto error;
+    }
+    BIO_seek(pem, 0);
+    if ((p7 = ngx_http_est_pkcs7(pem)) == NULL) {
+        goto error;
+    }
+    if (((pkcs7 = BIO_new(BIO_s_mem())) == NULL) ||
+            (!PEM_write_bio_PKCS7(pkcs7, p7))) {
+        goto error;
+    }
+    BIO_get_mem_ptr(pkcs7, &ptr);
+    /* assert(ptr != NULL); */
+
+    if ((content = ngx_pcalloc(r->pool, ptr->length)) == NULL) {
+        goto error;
+    }
+    b = ngx_pcalloc(r->pool, sizeof(ngx_buf_t));
+    if (b == NULL) {
+        goto error;
+    }
+    b->pos = b->last = content;
+    b->memory = 1;
+    b->last = ngx_copy(b->last, ptr->data, ptr->length);
+    b->last_buf = (r == r->main) ? 1 : 0;
+
+    out.buf = b;
+    out.next = NULL;
+
+    r->headers_out.content_type_len = sizeof("application/pkcs7-mime") - 1;
+    ngx_str_set(&r->headers_out.content_type, "application/pkcs7-mime");
+    r->headers_out.content_type_lowcase = NULL;
+    r->headers_out.status = NGX_HTTP_OK;
+    r->headers_out.content_length_n = b->last - b->pos;
+
+    rc = ngx_http_send_header(r);
+    if ((r->header_only) ||
+            (rc == NGX_ERROR) ||
+            (rc > NGX_OK)) {
+        ngx_http_finalize_request(r, rc);
         return;
     }
+    rc = ngx_http_output_filter(r, &out);
+error:
+    PKCS7_free(p7);
+    BIO_free(pkcs7);
+    BIO_free(pem);
+    X509_free(cert);
+    X509_REQ_free(req);
 
-    cert = ngx_http_est_x509_generate(r, req);
-    if (cert != NULL) {
-        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0, "ngx_http_est_x509_generate != NULL");
-    }
-
-    ngx_http_finalize_request(r, NGX_HTTP_NO_CONTENT);
+    ngx_http_finalize_request(r, rc);
 }
 
 

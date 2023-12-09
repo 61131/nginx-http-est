@@ -290,13 +290,7 @@ static char *
 ngx_http_est_command_root_certificate(ngx_conf_t *cf, ngx_command_t *cmd, void *conf) {
     ngx_http_est_loc_conf_t *lcf = conf;
     BIO *bp;
-    PKCS7 *p7;
-    PKCS7_SIGNED *p7s;
-    STACK_OF(X509) *stack;
-    STACK_OF(X509_INFO) *sk;
-    X509_INFO *info;
-    ngx_uint_t c;
-    char *rv;
+    char path[PATH_MAX], *rv;;
 
     /* assert(lcf != NULL); */
     rv = ngx_conf_set_str_slot(cf, cmd, conf);
@@ -310,31 +304,17 @@ ngx_http_est_command_root_certificate(ngx_conf_t *cf, ngx_command_t *cmd, void *
         for certificate retrieval, enrollment and reenrollment requests.
     */
 
-    p7 = NULL;
     bp = NULL;
-    stack = NULL;
-    sk = NULL;
-
-    rv = NGX_CONF_ERROR;
-
-    if ((p7 = PKCS7_new()) == NULL) {
+    ngx_memzero(path, sizeof(path));
+    ngx_snprintf((u_char *)path, sizeof(path),
+            "%*s",
+            lcf->ca_root_certificate.len,
+            lcf->ca_root_certificate.data);
+    if (ngx_strlen(path) == 0) {
         goto error;
     }
-    if ((p7s = PKCS7_SIGNED_new()) == NULL) {
-        goto error;
-    }
-    p7->type = OBJ_nid2obj(NID_pkcs7_signed);
-    p7->d.sign = p7s;
-    p7s->contents->type = OBJ_nid2obj(NID_pkcs7_data);
-    if (!ASN1_INTEGER_set(p7s->version, 1)) {
-        goto error;
-    }
-
-    if ((stack = sk_X509_new_null()) == NULL) {
-        goto error;
-    }
-    p7s->cert = stack;
-    if ((bp = BIO_new_file((const char *)lcf->ca_root_certificate.data, "r")) == NULL) {
+    if (((bp = BIO_new_file(path, "r")) == NULL) ||
+            ((lcf->root = ngx_http_est_pkcs7(bp)) == NULL)) {
         ngx_log_error(NGX_LOG_EMERG, cf->log, 0,
                 "%s: error opening root certificate: \"%*s\"",
                 MODULE_NAME,
@@ -342,37 +322,10 @@ ngx_http_est_command_root_certificate(ngx_conf_t *cf, ngx_command_t *cmd, void *
                 lcf->ca_root_certificate.data);
         goto error;
     }
-    if ((sk = PEM_X509_INFO_read_bio(bp, NULL, NULL, NULL)) == NULL) {
-        ngx_log_error(NGX_LOG_EMERG, cf->log, 0,
-                "%s: error reading root certificate: \"%*s\"",
-                MODULE_NAME,
-                lcf->ca_root_certificate.len,
-                lcf->ca_root_certificate.data);
-        goto error;
-    }
-
-    c = 0;
-    while (sk_X509_INFO_num(sk)) {
-        info = sk_X509_INFO_shift(sk);
-        if (info->x509 != NULL) {
-            sk_X509_push(p7s->cert, info->x509);
-            info->x509 = NULL;
-            ++c;
-        }
-        X509_INFO_free(info);
-    }
-    /* assert(c > 0); */
-
-    lcf->root = p7;
     rv = NGX_CONF_OK;
 
 error:
-    sk_X509_INFO_free(sk);
     BIO_free(bp);
-
-    if (rv != NGX_CONF_OK) {
-    	PKCS7_free(p7);
-    }
     return rv;
 }
 

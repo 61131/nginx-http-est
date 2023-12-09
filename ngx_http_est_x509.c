@@ -203,7 +203,7 @@ ngx_http_est_x509_generate(ngx_http_request_t *r, X509_REQ *req) {
     EVP_PKEY *pkey;
     X509 *cacert, *cert;
     X509_NAME *subj;
-    X509V3_CTX ctx;
+//    X509V3_CTX ctx;
 
     lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
     if (!lcf) {
@@ -216,6 +216,7 @@ ngx_http_est_x509_generate(ngx_http_request_t *r, X509_REQ *req) {
         code base prior to this point.
     */
 
+    pkey = NULL;
     serial = NULL;
 
     if ((cacert = _ngx_http_est_x509_cacert(r)) == NULL) {
@@ -223,6 +224,9 @@ ngx_http_est_x509_generate(ngx_http_request_t *r, X509_REQ *req) {
     }
     if ((cert = X509_new()) == NULL) {
         return NULL;
+    }
+    if (!X509_set_version(cert, X509_VERSION_3)) {
+        goto error;
     }
 
     /* assert(ngx_http_est_x509_verify(req)); */
@@ -255,16 +259,38 @@ ngx_http_est_x509_generate(ngx_http_request_t *r, X509_REQ *req) {
             (!X509_set_issuer_name(cert, subj))) {
         goto error;
     }
-    X509V3_set_ctx(&ctx, cacert, cert, NULL, NULL, X509V3_CTX_REPLACE);
+//    X509V3_set_ctx(&ctx, cacert, cert, NULL, NULL, X509V3_CTX_REPLACE);
 
     if ((pkey = _ngx_http_est_x509_privkey(r)) == NULL) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                "%s: error opening private key: \"%*s\"",
+                MODULE_NAME,
+                lcf->ca_private_key.len,
+                lcf->ca_private_key.data);
+        goto error;
+    }
+    if (!X509_check_private_key(cacert, pkey)) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                "%s: private key does not match CA certificate: \"%*s\"",
+                MODULE_NAME,
+                lcf->ca_private_key.len,
+                lcf->ca_private_key.data);
         goto error;
     }
 
+    if (!X509_sign(cert, pkey, EVP_sha256())) {
+        goto error;
+    }
+
+    EVP_PKEY_free(pkey);
+    ASN1_INTEGER_free(serial);
     return cert;
 
 error:
+    EVP_PKEY_free(pkey);
     ASN1_INTEGER_free(serial);
+    X509_free(cert);
+
     return NULL;
 }
 

@@ -12,8 +12,6 @@
 
 static ngx_buf_t * _ngx_http_est_request_body(ngx_http_request_t *r);
 
-static void _ngx_http_est_request_error(ngx_http_request_t *r, ngx_int_t status, char *message);
-
 static X509_REQ * _ngx_http_est_request_parse_csr(ngx_http_request_t *r);
 
 static void _ngx_http_est_request_simple(ngx_http_request_t *r);
@@ -46,60 +44,6 @@ _ngx_http_est_request_body(ngx_http_request_t *r) {
 }
 
 
-static void
-_ngx_http_est_request_error(ngx_http_request_t *r, ngx_int_t status, char *message) {
-    ngx_buf_t *b;
-    ngx_chain_t out;
-    ngx_int_t rc;
-    u_char *content;
-    size_t length;
-
-    length = (message != NULL) ? strlen(message) : 0;
-    content = ngx_pcalloc(r->pool, length + 2);
-    if (content == NULL) {
-        goto error;
-    }
-    b = ngx_pcalloc(r->pool, sizeof(ngx_buf_t));
-    if (b == NULL) {
-        goto error;
-    }
-    b->pos = b->last = content;
-    if (message != NULL) {
-        b->last = ngx_copy(b->last, message, length);
-    }
-    b->last = ngx_copy(b->last, CRLF, 2);
-    b->memory = 1;
-    b->last_buf = (r == r->main) ? 1 : 0;
-
-    out.buf = b;
-    out.next = NULL;
-
-    r->headers_out.content_type_len = sizeof("text/plain") - 1;
-    ngx_str_set(&r->headers_out.content_type, "text/plain");
-    r->headers_out.content_type_lowcase = NULL;
-    r->headers_out.status = status;
-    r->headers_out.content_length_n = b->last - b->pos;
-
-    rc = ngx_http_send_header(r);
-    if ((r->header_only) ||
-            (rc == NGX_ERROR) ||
-            (rc > NGX_OK)) {
-        ngx_http_finalize_request(r, rc);
-        return;
-    }
-
-    rc = ngx_http_output_filter(r, &out);
-    ngx_http_finalize_request(r, rc);
-
-    return;
-
-error:
-    ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-            "%s: error building error response message",
-            MODULE_NAME);
-}
-
-
 static X509_REQ *
 _ngx_http_est_request_parse_csr(ngx_http_request_t *r) {
     ngx_http_est_loc_conf_t *lcf;
@@ -107,7 +51,6 @@ _ngx_http_est_request_parse_csr(ngx_http_request_t *r) {
     ngx_buf_t *body;
     BIO *b64, *mem;
     BUF_MEM *buf;
-    EVP_PKEY *pkey;
     X509_REQ *req;
     ngx_uint_t i, j;
     size_t length;
@@ -115,30 +58,17 @@ _ngx_http_est_request_parse_csr(ngx_http_request_t *r) {
     int ret;
 
     req = NULL;
-    pkey = NULL;
     b64 = mem = NULL;
     buf = NULL;
 
     lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
-    if (lcf == NULL) {
-        goto error;
-    }
-
-    /*
-        This function is intended to validate that the Certificate Signing Request 
-        (CSR) received includes all attributes mandated by EST module location 
-        configuration. This function will return zero on success (where the CSR
-        includes all required attributes) and -1 on error.
-    */
-
+    /* assert(lcf != NULL); */
     if ((r->request_body == NULL) ||
             (r->request_body->bufs == NULL)) {
-        _ngx_http_est_request_error(r, NGX_HTTP_BAD_REQUEST, "Missing request body");
         return NULL;
     }
-    body = _ngx_http_est_request_body(r);
-    if (body == NULL) {
-        goto error;
+    if ((body = _ngx_http_est_request_body(r)) == NULL) {
+        return NULL;
     }
 
     /*
@@ -149,35 +79,32 @@ _ngx_http_est_request_parse_csr(ngx_http_request_t *r) {
         decoding functions to abort stream processing.
     */
 
-    mem = BIO_new_mem_buf(body->start, ngx_buf_size(body));
-    if (mem == NULL) {
-        goto error;
+    if ((mem = BIO_new_mem_buf(body->start, ngx_buf_size(body))) == NULL) {
+        return NULL;
     }
-    b64 = BIO_new(BIO_f_base64());
-    if (b64 == NULL) {
+    if ((b64 = BIO_new(BIO_f_base64())) == NULL) {
         goto error;
     }
     mem = BIO_push(b64, mem);
 
-    req = NULL;
     if (!d2i_X509_REQ_bio(mem, &req)) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                 "%s: error parsing certificate request",
                 MODULE_NAME);
-        _ngx_http_est_request_error(r, NGX_HTTP_BAD_REQUEST, "Error parsing certificate request");
-
         X509_REQ_free(req);
-        goto finish;
+        req = NULL;
+
+        goto error;
     }
     /* assert(req != NULL); */
     if (!ngx_http_est_x509_verify(req)) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                 "%s: error verifying certificate request",
                 MODULE_NAME);
-        _ngx_http_est_request_error(r, NGX_HTTP_BAD_REQUEST, "Error verifying certificate request");
-
         X509_REQ_free(req);
-        goto finish;
+        req = NULL;
+
+        goto error;
     }
 
     BIO_reset(mem);
@@ -201,10 +128,10 @@ _ngx_http_est_request_parse_csr(ngx_http_request_t *r) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                 "%s: error parsing certificate attributes",
                 MODULE_NAME);
-        _ngx_http_est_request_error(r, NGX_HTTP_BAD_REQUEST, "Error parsing certificate attributes");
-
         X509_REQ_free(req);
-        goto finish;
+        req = NULL;
+
+        goto error;
     }
 
     /*
@@ -233,31 +160,19 @@ _ngx_http_est_request_parse_csr(ngx_http_request_t *r) {
                         MODULE_NAME,
                         ((ngx_str_t *)lcf->attributes->elts)[i].len,
                         ((ngx_str_t *)lcf->attributes->elts)[i].data);
-                _ngx_http_est_request_error(r, NGX_HTTP_BAD_REQUEST, "Certificate signing request missing mandatory attribute");
-
                 X509_REQ_free(req);
-                goto finish;
+                req = NULL;
+
+                goto error;
             }
         }
     }
 
-finish:
+error:
     BUF_MEM_free(buf);
-    EVP_PKEY_free(pkey);
     BIO_free_all(mem);
 
     return req;
-
-error:
-    _ngx_http_est_request_error(r, NGX_HTTP_INTERNAL_SERVER_ERROR, 
-            "Internal server error");
-
-    BUF_MEM_free(buf);
-    EVP_PKEY_free(pkey);
-    X509_REQ_free(req);
-    BIO_free_all(mem);
-
-    return NULL;
 }
 
 
@@ -292,6 +207,11 @@ _ngx_http_est_request_simple(ngx_http_request_t *r) {
     if ((cert = ngx_http_est_x509_generate(r, req)) == NULL) {
         goto error;
     }
+    ngx_log_error(NGX_LOG_NOTICE, r->connection->log, 0,
+            "%s: certificate: \"%s\", subject: \"%s\"",
+            MODULE_NAME,
+            i2s_ASN1_INTEGER(NULL, X509_get0_serialNumber(cert)),
+            X509_NAME_oneline(X509_get_subject_name(cert), 0, 0));
 
     /*
         The following code will write the newly generated certificate into a memory 
@@ -302,6 +222,7 @@ _ngx_http_est_request_simple(ngx_http_request_t *r) {
             (!PEM_write_bio_X509(pem, cert))) {
         goto error;
     }
+    /* length = BIO_get_mem_data(pem, &pp); */
     BIO_seek(pem, 0);
     if ((p7 = ngx_http_est_pkcs7(pem)) == NULL) {
         goto error;
@@ -535,10 +456,7 @@ ngx_http_est_request_csrattrs(ngx_http_request_t *r, ngx_buf_t *b) {
     ngx_str_t str, res;
 
     lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
-    if (lcf == NULL) {
-        return NGX_DECLINED;
-    }
-
+    /* assert(lcf != NULL); */
     r->headers_out.status = NGX_HTTP_NO_CONTENT;
     r->headers_out.content_type_len = sizeof("application/csrattrs") - 1;
     ngx_str_set(&r->headers_out.content_type, "application/csrattrs");

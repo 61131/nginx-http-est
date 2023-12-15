@@ -9,7 +9,7 @@ The nginx-http-est module provides EST functionality for a Nginx server.
 ## Features
 
 * Distribution of CA certificates
-* ~~Client certificate request functions~~ (implementation in progress)
+* Client certificate request functions
 * ~~Full Certificate Management over CMS (CMC)~~
 * ~~Server-side key generation~~
 * CSR attributes
@@ -207,6 +207,14 @@ The EST server may authorize clients based upon either TLS certificate validatio
 If TLS certificate validation is configured, the client certificate is verified as per the operation of the `ssl_client_certificate` and `ssl_verify_client` HTTP SSL directives. It is important to note that as not all EST operations require authorization, the `ssl_verify_client` directive for the HTTP server MUST be set to `optional`.
 
 For HTTP-based authentication, the `est_auth_request` directive must be set with the URI location against which subrquests are issued to determine whether the given client is authorized.
+
+## Limitations
+
+The following limitations are noted with respect to this EST server implementation:
+
+* The EST server does not support Transport Layer Security Secure Remote Password (TLS-SRP) for certificate-less TLS mutual authentication.
+* The EST server does not implement proof-of-possession (POP) using TLS session-specific information.
+* The EST server does not (yet) validate Subject field and SubjectAltName extension within certificate signing requests submitted for re-enrollment. This is primarily due to the limited meta-data persistence associated with certificate generation and renewal.
 
 ## References
 

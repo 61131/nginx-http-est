@@ -213,7 +213,7 @@ For HTTP-based authentication, the `est_auth_request` directive must be set with
 The following limitations are noted with respect to this EST server implementation:
 
 * The EST server does not support Transport Layer Security Secure Remote Password (TLS-SRP) for certificate-less TLS mutual authentication.
-* The EST server does not implement proof-of-possession (POP) using TLS session-specific information.
+* The EST server does not (yet) implement proof-of-possession (POP) using TLS session-specific information. A patch has been submitted to the nginx-devel mailing list to introduce access to the last TLS Finished message as required for tls-unique (TLSv1.2) and tls-exporter (TLSv1.3) in order to verify possession of the CSR private key.
 * The EST server does not (yet) validate Subject field and SubjectAltName extension within certificate signing requests submitted for re-enrollment. This is primarily due to the limited meta-data persistence associated with certificate generation and renewal.
 
 ## References

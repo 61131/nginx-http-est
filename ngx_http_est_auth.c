@@ -5,6 +5,68 @@
 #include "ngx_http_est.h"
 
 
+static ngx_int_t _ngx_http_est_auth_required(ngx_http_request_t *r);
+
+static ngx_int_t _ngx_http_est_auth_response(ngx_http_request_t *r, void *data, ngx_int_t rc);
+
+
+static ngx_int_t 
+_ngx_http_est_auth_required(ngx_http_request_t *r) {
+    ngx_http_core_loc_conf_t *clcf;
+    ngx_http_est_dispatch_t *d;
+    ngx_http_est_loc_conf_t *lcf;
+    ngx_int_t i, len;
+    u_char *ptr, *uri;
+
+    lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
+    if (lcf->enable == 0) {
+        return 0;
+    }
+    if ((lcf->verify_client & VERIFY_AUTHENTICATION) == 0) {
+        return 0;
+    }
+
+    clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
+    /* assert(ngx_strstr(r->uri.data, clcf->name.data) == r->uri.data); */
+    ptr = r->uri.data + ngx_strlen(clcf->name.data);
+    if (*ptr == '/') {
+        ++ptr;
+    }
+    len = r->uri.len - (ptr - r->uri.data);
+    if (len <= 0) {
+        return 0;
+    }
+    uri = ngx_pcalloc(r->pool, len + 1);
+    if (uri == NULL) {
+        return 0;
+    }
+    strncpy((char *)uri, (char *)ptr, len);
+
+    for (i = 0;; ++i) {
+        d = &ngx_http_est_dispatch[i];
+        if (d->name.len == 0) {
+            break;
+        }
+        if (ngx_strcmp(d->name.data, uri) != 0) {
+            continue;
+        }
+        return (d->verify != 0);
+    }
+
+    return 0;
+}
+
+
+ngx_int_t
+_ngx_http_est_auth_response(ngx_http_request_t *r, void *data, ngx_int_t rc) {
+    ngx_http_est_auth_request_t *ctx = data;
+
+    ctx->done = 1;
+    ctx->status = r->headers_out.status;
+    return rc;
+}
+
+
 ngx_int_t 
 ngx_http_est_auth(ngx_http_request_t *r) {
     ngx_http_est_loc_conf_t *lcf;
@@ -13,7 +75,7 @@ ngx_http_est_auth(ngx_http_request_t *r) {
     ngx_http_post_subrequest_t *ps;
     ngx_table_elt_t *h, *ho, **ph;
 
-    if (!ngx_http_est_auth_required(r)) {
+    if (!_ngx_http_est_auth_required(r)) {
         return NGX_OK;
     }
     lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
@@ -35,7 +97,7 @@ ngx_http_est_auth(ngx_http_request_t *r) {
         if (ps == NULL) {
             return NGX_ERROR;
         }
-        ps->handler = ngx_http_est_auth_response;
+        ps->handler = _ngx_http_est_auth_response;
         ps->data = ctx;
 
         ngx_log_error(NGX_LOG_INFO, r->connection->log, 0, "%s: issuing subrequest for %*s",
@@ -96,60 +158,4 @@ ngx_http_est_auth(ngx_http_request_t *r) {
     return NGX_HTTP_INTERNAL_SERVER_ERROR;
 }
 
-
-ngx_int_t 
-ngx_http_est_auth_required(ngx_http_request_t *r) {
-    ngx_http_core_loc_conf_t *clcf;
-    ngx_http_est_dispatch_t *d;
-    ngx_http_est_loc_conf_t *lcf;
-    ngx_int_t i, len;
-    u_char *ptr, *uri;
-
-    lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
-    if (lcf->enable == 0) {
-        return 0;
-    }
-    if ((lcf->verify_client & VERIFY_AUTHENTICATION) == 0) {
-        return 0;
-    }
-
-    clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
-    /* assert(ngx_strstr(r->uri.data, clcf->name.data) == r->uri.data); */
-    ptr = r->uri.data + ngx_strlen(clcf->name.data);
-    if (*ptr == '/') {
-        ++ptr;
-    }
-    len = r->uri.len - (ptr - r->uri.data);
-    if (len <= 0) {
-        return 0;
-    }
-    uri = ngx_pcalloc(r->pool, len + 1);
-    if (uri == NULL) {
-        return 0;
-    }
-    strncpy((char *)uri, (char *)ptr, len);
-
-    for (i = 0;; ++i) {
-        d = &ngx_http_est_dispatch[i];
-        if (d->name.len == 0) {
-            break;
-        }
-        if (ngx_strcmp(d->name.data, uri) != 0) {
-            continue;
-        }
-        return (d->verify != 0);
-    }
-
-    return 0;
-}
-
-
-ngx_int_t
-ngx_http_est_auth_response(ngx_http_request_t *r, void *data, ngx_int_t rc) {
-    ngx_http_est_auth_request_t *ctx = data;
-
-    ctx->done = 1;
-    ctx->status = r->headers_out.status;
-    return rc;
-}
 

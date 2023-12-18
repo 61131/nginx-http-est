@@ -76,10 +76,6 @@ ngx_int_t ngx_http_est_asn1_parse(ngx_array_t *array, const unsigned char **data
 
 ngx_int_t ngx_http_est_auth(ngx_http_request_t *r);
 
-ngx_int_t ngx_http_est_auth_required(ngx_http_request_t *r);
-
-ngx_int_t ngx_http_est_auth_response(ngx_http_request_t *r, void *data, ngx_int_t rc);
-
 PKCS7 * ngx_http_est_pkcs7(BIO *bp);
 
 ngx_int_t ngx_http_est_request(ngx_http_request_t *r);

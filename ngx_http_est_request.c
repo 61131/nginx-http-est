@@ -168,6 +168,12 @@ _ngx_http_est_request_parse_csr(ngx_http_request_t *r) {
         }
     }
 
+    //ngx_log_error(NGX_LOG_DEBUG, r->connection->log, 0,
+    //        "%s:\n%*s",
+    //        MODULE_NAME,
+    //        ngx_buf_size(body),
+    //        body->start);
+
 error:
     BUF_MEM_free(buf);
     BIO_free_all(mem);
@@ -187,6 +193,7 @@ _ngx_http_est_request_simple(ngx_http_request_t *r) {
     ngx_chain_t out;
     ngx_int_t rc;
     u_char *content;
+    size_t len;
 
     /*
         This function implements handling for HTTP request bodies submitted to the 
@@ -231,10 +238,14 @@ _ngx_http_est_request_simple(ngx_http_request_t *r) {
             (!PEM_write_bio_PKCS7(pkcs7, p7))) {
         goto error;
     }
+
     BIO_get_mem_ptr(pkcs7, &ptr);
     /* assert(ptr != NULL); */
-
-    if ((content = ngx_pcalloc(r->pool, ptr->length)) == NULL) {
+    /* assert(ptr->length > 42); */
+    /* assert(ngx_strncmp(ptr->data, "-----BEGIN PKCS7-----\n", 22) == 0); */
+    /* assert(ngx_strncmp(..., "-----END PKCS7-----\n", 20) == 0); */
+    len = ptr->length - 42;
+    if ((content = ngx_pcalloc(r->pool, len)) == NULL) {
         goto error;
     }
     b = ngx_pcalloc(r->pool, sizeof(ngx_buf_t));
@@ -243,7 +254,7 @@ _ngx_http_est_request_simple(ngx_http_request_t *r) {
     }
     b->pos = b->last = content;
     b->memory = 1;
-    b->last = ngx_copy(b->last, ptr->data, ptr->length);
+    b->last = ngx_copy(b->last, ptr->data + 22, len);
     b->last_buf = (r == r->main) ? 1 : 0;
 
     out.buf = b;
@@ -396,7 +407,7 @@ ngx_http_est_request(ngx_http_request_t *r) {
     if ((rc = d->handler(r, b)) != NGX_OK) {
         return rc;
     }
-    b->last_buf = (r == r->main) ? 1 :0;
+    b->last_buf = (r == r->main) ? 1 : 0;
     r->headers_out.content_length_n = b->last - b->pos;
 
     rc = ngx_http_send_header(r);
@@ -416,6 +427,7 @@ ngx_http_est_request_cacerts(ngx_http_request_t *r, ngx_buf_t *b) {
     BIO *bp;
     BUF_MEM *ptr;
     u_char *content;
+    size_t len;
     int rc;
 
     lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
@@ -433,14 +445,24 @@ ngx_http_est_request_cacerts(ngx_http_request_t *r, ngx_buf_t *b) {
         goto error;
     }
 
+    /*
+        The following code will strip the PKCS7 certificate header and footer, 
+        leaving only the base64 encoded bytes, to ensure compatibility with 
+        different EST clients.
+    */
+
     BIO_get_mem_ptr(bp, &ptr);
     /* assert(ptr != NULL); */
-    if ((content = ngx_pcalloc(r->pool, ptr->length)) == NULL) {
+    /* assert(ptr->length > 42); */
+    /* assert(ngx_strncmp(ptr->data, "-----BEGIN PKCS7-----\n", 22) == 0); */
+    /* assert(ngx_strncmp(..., "-----END PKCS7-----\n", 20) == 0); */
+    len = ptr->length - 42;
+    if ((content = ngx_pcalloc(r->pool, len)) == NULL) {
         goto error;
     }
     b->pos = b->last = content;
     b->memory = 1;
-    b->last = ngx_copy(b->last, ptr->data, ptr->length);
+    b->last = ngx_copy(b->last, ptr->data + 22, len);
 
     rc = NGX_OK;
 

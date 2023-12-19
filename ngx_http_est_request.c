@@ -51,8 +51,10 @@ _ngx_http_est_request_parse_csr(ngx_http_request_t *r) {
     ngx_buf_t *body;
     BIO *b64, *mem;
     BUF_MEM *buf;
+    X509_ATTRIBUTE *attr;
     X509_REQ *req;
     ngx_uint_t i, j;
+    ngx_int_t index;
     size_t length;
     char *pp;
     int ret;
@@ -105,6 +107,28 @@ _ngx_http_est_request_parse_csr(ngx_http_request_t *r) {
         req = NULL;
 
         goto error;
+    }
+
+    /*
+        If the EST server is configured to require the client to demonstrate proof-
+        of-possession of the CSR private key, the challengePassword attribute in the 
+        CSR should be validated.
+    */
+
+    if (lcf->pop) {
+        index = X509_REQ_get_attr_by_NID(req, NID_pkcs9_challengePassword, -1);
+        if (index < 0) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                    "%s: challengePassword attribute missing from certificate request",
+                    MODULE_NAME);
+            X509_REQ_free(req);
+            req = NULL;
+
+            goto error;
+        }
+        attr = X509_REQ_get_attr(req, index);
+        /* assert(attr != NULL); */
+        if (attr != NULL) {}
     }
 
     BIO_reset(mem);
@@ -193,7 +217,7 @@ _ngx_http_est_request_simple(ngx_http_request_t *r) {
     ngx_chain_t out;
     ngx_int_t rc;
     u_char *content;
-    size_t len;
+    size_t length;
 
     /*
         This function implements handling for HTTP request bodies submitted to the 
@@ -244,8 +268,8 @@ _ngx_http_est_request_simple(ngx_http_request_t *r) {
     /* assert(ptr->length > 42); */
     /* assert(ngx_strncmp(ptr->data, "-----BEGIN PKCS7-----\n", 22) == 0); */
     /* assert(ngx_strncmp(..., "-----END PKCS7-----\n", 20) == 0); */
-    len = ptr->length - 42;
-    if ((content = ngx_pcalloc(r->pool, len)) == NULL) {
+    length = ptr->length - 42;
+    if ((content = ngx_pcalloc(r->pool, length)) == NULL) {
         goto error;
     }
     b = ngx_pcalloc(r->pool, sizeof(ngx_buf_t));
@@ -254,7 +278,7 @@ _ngx_http_est_request_simple(ngx_http_request_t *r) {
     }
     b->pos = b->last = content;
     b->memory = 1;
-    b->last = ngx_copy(b->last, ptr->data + 22, len);
+    b->last = ngx_copy(b->last, ptr->data + 22, length);
     b->last_buf = (r == r->main) ? 1 : 0;
 
     out.buf = b;
@@ -427,7 +451,7 @@ ngx_http_est_request_cacerts(ngx_http_request_t *r, ngx_buf_t *b) {
     BIO *bp;
     BUF_MEM *ptr;
     u_char *content;
-    size_t len;
+    size_t length;
     int rc;
 
     lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
@@ -456,13 +480,13 @@ ngx_http_est_request_cacerts(ngx_http_request_t *r, ngx_buf_t *b) {
     /* assert(ptr->length > 42); */
     /* assert(ngx_strncmp(ptr->data, "-----BEGIN PKCS7-----\n", 22) == 0); */
     /* assert(ngx_strncmp(..., "-----END PKCS7-----\n", 20) == 0); */
-    len = ptr->length - 42;
-    if ((content = ngx_pcalloc(r->pool, len)) == NULL) {
+    length = ptr->length - 42;
+    if ((content = ngx_pcalloc(r->pool, length)) == NULL) {
         goto error;
     }
     b->pos = b->last = content;
     b->memory = 1;
-    b->last = ngx_copy(b->last, ptr->data + 22, len);
+    b->last = ngx_copy(b->last, ptr->data + 22, length);
 
     rc = NGX_OK;
 

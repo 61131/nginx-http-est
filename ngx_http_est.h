@@ -31,6 +31,7 @@ typedef struct {
     ngx_str_t   csr_attrs;
     ngx_flag_t  enable;
     ngx_flag_t  http;
+    ngx_flag_t  pop;
     ngx_int_t   verify_client;
 
     /* array(ngx_str_t) CSR attributes */
@@ -87,6 +88,8 @@ ngx_int_t ngx_http_est_request_csrattrs(ngx_http_request_t *r, ngx_buf_t *b);
 ngx_int_t ngx_http_est_request_not_implemented(ngx_http_request_t *r, ngx_buf_t *b);
 
 ngx_int_t ngx_http_est_request_simple_request(ngx_http_request_t *r, ngx_buf_t *b);
+
+ngx_int_t ngx_http_est_tls_unique(ngx_http_request_t *r, ngx_str_t *s);
 
 X509 * ngx_http_est_x509_generate(ngx_http_request_t *r, X509_REQ *req);
 

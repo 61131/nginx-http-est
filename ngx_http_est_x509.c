@@ -200,10 +200,13 @@ X509 *
 ngx_http_est_x509_generate(ngx_http_request_t *r, X509_REQ *req) {
     ngx_http_est_loc_conf_t *lcf;
     ASN1_INTEGER *serial;
+    ASN1_OBJECT *obj;
     EVP_PKEY *pkey;
+    STACK_OF(X509_EXTENSION) *exts;
     X509 *cacert, *cert;
+    X509_EXTENSION *ext;
     X509_NAME *subj;
-//    X509V3_CTX ctx;
+    int i, j;
 
     lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
     if (!lcf) {
@@ -241,6 +244,38 @@ ngx_http_est_x509_generate(ngx_http_request_t *r, X509_REQ *req) {
         goto error;
     }
 
+    /*
+        The following block of code copies requested extensions from the CSR into 
+        the generated certificate. This code may be expanded in the future to limit 
+        the extensions that can be requested by EST clients and included in 
+        certificates.
+    */
+
+    exts = X509_REQ_get_extensions(req);
+    for (i = 0; i < sk_X509_EXTENSION_num(exts); i++) {
+        ext = sk_X509_EXTENSION_value(exts, i);
+        /* assert(ext != NULL); */
+        obj = X509_EXTENSION_get_object(ext);
+        /* assert(obj != NULL); */
+        j = X509_get_ext_by_OBJ(cert, obj, -1);
+        if (j != -1) {
+            do {
+                X509_EXTENSION_free(X509_delete_ext(cert, j));
+                j = X509_get_ext_by_OBJ(cert, obj, -1);
+            }
+            while (j != -1);
+        }
+        X509_add_ext(cert, ext, -1);
+    }
+    sk_X509_EXTENSION_pop_free(exts, X509_EXTENSION_free);
+
+    /* assert(cacert != NULL); */
+    subj = X509_get_subject_name(cacert);
+    if ((subj == NULL) ||
+            (!X509_set_issuer_name(cert, subj))) {
+        goto error;
+    }
+
     if (X509_gmtime_adj(X509_getm_notBefore(cert), 0) == NULL) {
         goto error;
     }
@@ -252,14 +287,6 @@ ngx_http_est_x509_generate(ngx_http_request_t *r, X509_REQ *req) {
     if (serial != NULL) {
         X509_set_serialNumber(cert, serial);
     }
-
-    /* assert(cacert != NULL); */
-    subj = X509_get_subject_name(cacert);
-    if ((subj == NULL) ||
-            (!X509_set_issuer_name(cert, subj))) {
-        goto error;
-    }
-//    X509V3_set_ctx(&ctx, cacert, cert, NULL, NULL, X509V3_CTX_REPLACE);
 
     if ((pkey = _ngx_http_est_x509_privkey(r)) == NULL) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,

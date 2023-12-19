@@ -6,6 +6,7 @@ SRCS="$ngx_addon_dir/ngx_http_est.c \
     $ngx_addon_dir/ngx_http_est_auth.c \
     $ngx_addon_dir/ngx_http_est_pkcs7.c \
     $ngx_addon_dir/ngx_http_est_request.c \
+    $ngx_addon_dir/ngx_http_est_tls.c \
     $ngx_addon_dir/ngx_http_est_x509.c"
 
 LIBS="-lcrypto -lssl"

@@ -219,5 +219,6 @@ The following limitations are noted with respect to this EST server implementati
 ## References
 
 * [RFC 7030 Enrollment over Secure Transport](https://datatracker.ietf.org/doc/html/rfc7030)
+* [RFC 8295 EST (Enrollment over Secure Transport) Extensions](https://datatracker.ietf.org/doc/html/rfc8295)
 * [RFC 8951 Clarification of Enrollment over Secure Transport (EST): Transfer Encodings and ASN.1](https://datatracker.ietf.org/doc/html/rfc8951)
 

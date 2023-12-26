@@ -10,6 +10,7 @@
 ngx_int_t
 ngx_http_est_tls_unique(ngx_http_request_t *r, ngx_str_t *s) {
     ngx_connection_t *c;
+    ngx_str_t src;
     u_char buf[NGX_HTTP_EST_TLS_UNIQUE];
     size_t length;
 
@@ -28,13 +29,15 @@ ngx_http_est_tls_unique(ngx_http_request_t *r, ngx_str_t *s) {
         s->len = 0;
         return NGX_OK;
     }
+    src.data = buf;
+    src.len = length;
 
-    s->len = 2 * length;
+    s->len = ngx_base64_encoded_length(length);
     s->data = ngx_pnalloc(r->pool, s->len);
     if (s->data == NULL) {
         return NGX_ERROR;
     }
-    ngx_hex_dump(s->data, buf, length);
+    ngx_encode_base64(s, &src); 
     return NGX_OK;
 }
 

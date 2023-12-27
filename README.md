@@ -11,7 +11,7 @@ The nginx-http-est module provides EST functionality for a Nginx server.
 * Distribution of CA certificates
 * Client certificate request functions
 * ~~Full Certificate Management over CMS (CMC)~~
-* ~~Server-side key generation~~
+* ~~Server-side key generation~~ (Work in progress)
 * CSR attributes
 * TLS certificate and HTTP-based authentication
 * Proof-of-possession (POP) validation

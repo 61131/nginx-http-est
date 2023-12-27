@@ -60,7 +60,7 @@ ngx_http_est_dispatch_t ngx_http_est_dispatch[] = {
     { ngx_string("serverkeygen"),
         NGX_HTTP_POST,
         1,
-        ngx_http_est_request_not_implemented },
+        ngx_http_est_request_simple_request },
 
     /* 4.5.1 CSR Attributes Request */
 

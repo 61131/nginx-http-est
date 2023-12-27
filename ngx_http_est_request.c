@@ -14,6 +14,8 @@ static ngx_buf_t * _ngx_http_est_request_body(ngx_http_request_t *r);
 
 static X509_REQ * _ngx_http_est_request_parse_csr(ngx_http_request_t *r);
 
+static void _ngx_http_est_request_serverkeygen(ngx_http_request_t *r);
+
 static void _ngx_http_est_request_simple(ngx_http_request_t *r);
 
 
@@ -223,6 +225,36 @@ error:
     BIO_free_all(mem);
 
     return req;
+}
+
+
+static void 
+_ngx_http_est_request_serverkeygen(ngx_http_request_t *r) {
+    X509_REQ *req;
+    ngx_int_t rc;
+
+    rc = NGX_HTTP_BAD_REQUEST;
+
+    /*
+        This function implements handling for the HTTP request body submitted to 
+        the EST API end-point for certificate and server-side key generation. This 
+        is performed by reading and parsing the Certificate Signing Request (CSR) 
+        contained in the request body and validating this per local configuration 
+        in the same manner as is performed for simple certificate enrollment and 
+        re-enrollment requests. The difference with this function is that the 
+        public key associated with the submitted CSR is replaced entirely with a 
+        newly generated key. The new certificate and private key is then returned 
+        to the client.
+    */
+
+    if ((req = _ngx_http_est_request_parse_csr(r)) == NULL) {
+        goto error;
+    }
+
+error:
+    X509_REQ_free(req);
+
+    ngx_http_finalize_request(r, rc);
 }
 
 
@@ -557,14 +589,24 @@ ngx_http_est_request_not_implemented(ngx_http_request_t *r, ngx_buf_t *b) {
 
 ngx_int_t 
 ngx_http_est_request_simple_request(ngx_http_request_t *r, ngx_buf_t *b) {
+    ngx_http_core_loc_conf_t *clcf;
     ngx_str_t value;
     ngx_int_t rc;
+    u_char *ptr;
+
+    clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
+    if (clcf == NULL) {
+        return NGX_DECLINED;
+    }
 
     /*
         This function will process the request headers before establishing a 
         callback handler to processing the request body which is expected to 
         contain the certificate signing request (CSR) associated with the 
-        /simpleenroll or /simplereenroll request.
+        /simpleenroll, /simplereenroll or /serverkeygen request. It should be noted 
+        that different callback functions are employed depending upon whether the 
+        request is for certificate (re-)enrollment or certificate enrollment with 
+        server-side key generation.
     */
 
     /* assert(r->method == NGX_HTTP_POST); */
@@ -577,7 +619,17 @@ ngx_http_est_request_simple_request(ngx_http_request_t *r, ngx_buf_t *b) {
         return NGX_HTTP_BAD_REQUEST;
     }
 
-    rc = ngx_http_read_client_request_body(r, _ngx_http_est_request_simple);
+    ptr = r->uri.data;
+    /* assert(ngx_strstr(ptr, clcf->name.data) == (char *) ptr); */
+    ptr += ngx_strlen(clcf->name.data);
+    if (*ptr == '/') {
+        ++ptr;
+    }
+    rc = ngx_http_read_client_request_body(r,
+            (ngx_strcmp(ptr, "serverkeygen") == 0) ?
+                    _ngx_http_est_request_serverkeygen :
+                    _ngx_http_est_request_simple);
+
     if (rc >= NGX_HTTP_SPECIAL_RESPONSE) {
         return rc;
     }

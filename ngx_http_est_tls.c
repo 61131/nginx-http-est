@@ -32,8 +32,9 @@ ngx_http_est_tls_unique(ngx_http_request_t *r, ngx_str_t *s) {
     src.data = buf;
     src.len = length;
 
-    s->len = ngx_base64_encoded_length(length);
-    s->data = ngx_pnalloc(r->pool, s->len);
+    /* assert(s != NULL); */
+    s->len = ngx_base64_encoded_length(src.len);
+    s->data = ngx_pcalloc(r->pool, s->len);
     if (s->data == NULL) {
         return NGX_ERROR;
     }

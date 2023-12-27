@@ -384,7 +384,7 @@ ngx_http_est_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child) {
     ngx_conf_merge_value(conf->enable, prev->enable, 0);
     ngx_conf_merge_value(conf->http, prev->http, 0);
     ngx_conf_merge_value(conf->pop, prev->pop, 0);
-    ngx_conf_merge_value(conf->verify_client, prev->verify_client, VERIFY_CERTIFICATE);
+    ngx_conf_merge_value(conf->verify_client, prev->verify_client, VERIFY_NONE);
     ngx_conf_merge_ptr_value(conf->attributes, prev->attributes, NULL);
     ngx_conf_merge_ptr_value(conf->buf, prev->buf, NULL);
     ngx_conf_merge_ptr_value(conf->root, prev->root, NULL);

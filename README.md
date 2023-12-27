@@ -14,6 +14,7 @@ The nginx-http-est module provides EST functionality for a Nginx server.
 * ~~Server-side key generation~~
 * CSR attributes
 * TLS certificate and HTTP-based authentication
+* Proof-of-possession (POP) validation
 
 ## Build
 
@@ -184,6 +185,18 @@ Permits HTTP requests to be used for EST operations.
 
 While [RFC 7030](https://datatracker.ietf.org/doc/html/rfc7030) describes the use of a TLS-secured HTTP session for EST operations, the use of unsecured HTTP may be useful where a device lacks bootstrap client TLS certificates. This mode of operations is also useful to provide visibility of EST operations for development and debugging purposes.
 
+### est_pop
+
+* **syntax:** `est_pop on|off`
+* **default:** `off`
+* **content:** `location`
+
+Requires client demonstrate proof-of-possession (POP) of private key.
+
+This directive requires that all clients demonstrate the proof-of-possession (POP) of the private key associated with a certification request and that the client was able to sign the certification request after the TLS session was established. This demonstration requires the client to include the tls-unique value from the TLS subsystem as described in Channel Bindings for TLS [RFC 5929](https://datatracker.ietf.org/doc/html/rfc5929) as an attribute within the CSR.
+
+Where enabled, this directive requires the client to include the tls-unique value as a base64 encoded string in the certification request challenge-password field. If this attribute is missing or mismatched with that on the server, the certificate generation request will fail.
+
 ### est_root_certificate
 
 * **syntax:** `est_root_certificate <filename>`
@@ -213,7 +226,6 @@ For HTTP-based authentication, the `est_auth_request` directive must be set with
 The following limitations are noted with respect to this EST server implementation:
 
 * The EST server does not support Transport Layer Security Secure Remote Password (TLS-SRP) for certificate-less TLS mutual authentication.
-* The EST server does not (yet) implement proof-of-possession (POP) using TLS session-specific information. The implementation of this functionality is however in progress.
 * The EST server does not (yet) validate Subject field and SubjectAltName extension within certificate signing requests submitted for re-enrollment. This is primarily due to the limited meta-data persistence associated with certificate generation and renewal.
 
 ## References

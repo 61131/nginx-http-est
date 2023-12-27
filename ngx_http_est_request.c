@@ -49,12 +49,15 @@ _ngx_http_est_request_parse_csr(ngx_http_request_t *r) {
     ngx_http_est_loc_conf_t *lcf;
     ngx_array_t attributes;
     ngx_buf_t *body;
+    ASN1_BIT_STRING *bs;
+    ASN1_TYPE *type;
     BIO *b64, *mem;
     BUF_MEM *buf;
     X509_ATTRIBUTE *attr;
     X509_REQ *req;
     ngx_uint_t i, j;
     ngx_int_t index;
+    ngx_str_t cp;
     size_t length;
     char *pp;
     int ret;
@@ -116,6 +119,16 @@ _ngx_http_est_request_parse_csr(ngx_http_request_t *r) {
     */
 
     if (lcf->pop) {
+        if (ngx_http_est_tls_unique(r, &cp) != NGX_OK) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                    "%s: error retrieving TLS handshake information",
+                    MODULE_NAME);
+            X509_REQ_free(req);
+            req = NULL;
+
+            goto error;
+        }
+
         index = X509_REQ_get_attr_by_NID(req, NID_pkcs9_challengePassword, -1);
         if (index < 0) {
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
@@ -128,7 +141,20 @@ _ngx_http_est_request_parse_csr(ngx_http_request_t *r) {
         }
         attr = X509_REQ_get_attr(req, index);
         /* assert(attr != NULL); */
-        if (attr != NULL) {}
+        type = X509_ATTRIBUTE_get0_type(attr, 0);
+        /* assert(type != NULL); */
+        bs = type->value.asn1_string;
+        /* assert(bs != NULL); */
+        if ((bs->length != (int) cp.len) ||
+                (memcmp(bs->data, cp.data, bs->length) != 0)) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                    "%s: invalid challengePassword attribute in certificate request",
+                    MODULE_NAME);
+            X509_REQ_free(req);
+            req = NULL;
+
+            goto error;
+        }
     }
 
     BIO_reset(mem);
@@ -191,12 +217,6 @@ _ngx_http_est_request_parse_csr(ngx_http_request_t *r) {
             }
         }
     }
-
-    //ngx_log_error(NGX_LOG_DEBUG, r->connection->log, 0,
-    //        "%s:\n%*s",
-    //        MODULE_NAME,
-    //        ngx_buf_size(body),
-    //        body->start);
 
 error:
     BUF_MEM_free(buf);

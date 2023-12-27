@@ -1,0 +1,4 @@
+asn1=SEQUENCE:AttrOrOID
+
+[AttrOrOID]
+field1 = OID:1.2.840.113549.1.9.7       # challengePassword

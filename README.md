@@ -44,6 +44,7 @@ Note that the nginx-http-est module is dependent upon the HTTP SSL module for no
             est on;
             est_auth_request /auth-backend;
             est_csr_attrs /etc/nginx/ssl/csrattrs.der;
+            est_pop off;
             est_root_certificate /etc/nginx/ssl/Org-RootCA.crt;
             est_verify_client cert;
 
@@ -193,7 +194,7 @@ While [RFC 7030](https://datatracker.ietf.org/doc/html/rfc7030) describes the us
 
 Requires client demonstrate proof-of-possession (POP) of private key.
 
-This directive requires that all clients demonstrate the proof-of-possession (POP) of the private key associated with a certification request and that the client was able to sign the certification request after the TLS session was established. This demonstration requires the client to include the tls-unique value from the TLS subsystem as described in Channel Bindings for TLS [RFC 5929](https://datatracker.ietf.org/doc/html/rfc5929) as an attribute within the CSR.
+This directive requires that all clients demonstrate the proof-of-possession (POP) of the private key associated with a certification request and that the client was able to sign the certification request after the TLS session was established. This demonstration requires the client to include the tls-unique value from the TLS subsystem as described in [RFC 5929](https://datatracker.ietf.org/doc/html/rfc5929) as an attribute within the CSR.
 
 Where enabled, this directive requires the client to include the tls-unique value as a base64 encoded string in the certification request challenge-password field. If this attribute is missing or mismatched with that on the server, the certificate generation request will fail.
 

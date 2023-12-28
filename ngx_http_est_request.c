@@ -411,11 +411,6 @@ ngx_http_est_request(ngx_http_request_t *r) {
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
     strncpy((char *)uri, (char *)ptr, c);
-    ngx_log_error(NGX_LOG_INFO, r->connection->log, 0, "%s: \"%*s\"", 
-            MODULE_NAME,
-            (size_t)c, 
-            ptr);
-
 
     /*
         Determine whether the requested EST API end-point is supported for the given 
@@ -432,6 +427,12 @@ ngx_http_est_request(ngx_http_request_t *r) {
         if ((rc = ngx_strcmp(d->name.data, uri)) != 0) {
             continue;
         }
+
+        ngx_log_error(NGX_LOG_INFO, r->connection->log, 0, "%s: \"%*s\"", 
+                MODULE_NAME,
+                (size_t)c, 
+                ptr);
+
         if ((d->method & r->method) == 0) {
             return NGX_HTTP_NOT_ALLOWED;
         }
@@ -626,7 +627,7 @@ ngx_http_est_request_simple_request(ngx_http_request_t *r, ngx_buf_t *b) {
         ++ptr;
     }
     rc = ngx_http_read_client_request_body(r,
-            (ngx_strcmp(ptr, "serverkeygen") == 0) ?
+            (ngx_strncmp(ptr, "serverkeygen", 12) == 0) ?   //  NB: ptr is not '\0' terminated!
                     _ngx_http_est_request_serverkeygen :
                     _ngx_http_est_request_simple);
 

@@ -44,7 +44,6 @@ Note that the nginx-http-est module is dependent upon the HTTP SSL module for no
             est on;
             est_auth_request /auth-backend;
             est_csr_attrs /etc/nginx/ssl/csrattrs.der;
-            est_http off;
             est_pop on;
             est_root_certificate /etc/nginx/ssl/Org-RootCA.crt;
             est_verify_client cert;

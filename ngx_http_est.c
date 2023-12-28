@@ -73,12 +73,19 @@ ngx_http_est_dispatch_t ngx_http_est_dispatch[] = {
 };
 
 
-static ngx_conf_enum_t ngx_http_est_client_verify[] = {
+static ngx_conf_enum_t ngx_http_est_enum_client_verify[] = {
     { ngx_string("none"), VERIFY_NONE },
     { ngx_string("auth"), VERIFY_AUTHENTICATION }, 
     { ngx_string("cert"), VERIFY_CERTIFICATE },
     { ngx_string("both"), VERIFY_BOTH }, 
  /* { ngx_string("any"), VERIFY_ANY }, */
+    { ngx_null_string, 0 },
+};
+
+static ngx_conf_enum_t ngx_http_est_enum_http[] = {
+    { ngx_string("off"), HTTP_DISALLOW },
+    { ngx_string("on"), HTTP_ALLOW },
+    { ngx_string("limit"), HTTP_LIMIT },
     { ngx_null_string, 0 },
 };
 
@@ -109,10 +116,10 @@ static ngx_command_t ngx_http_est_commands[] = {
 
     { ngx_string("est_http"),
         NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_conf_set_flag_slot,
+        ngx_conf_set_enum_slot,
         NGX_HTTP_LOC_CONF_OFFSET,
         offsetof(ngx_http_est_loc_conf_t, http),
-        NULL },
+        &ngx_http_est_enum_http },
 
     { ngx_string("est_pop"), 
         NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
@@ -133,7 +140,7 @@ static ngx_command_t ngx_http_est_commands[] = {
         ngx_conf_set_enum_slot,
         NGX_HTTP_LOC_CONF_OFFSET,
         offsetof(ngx_http_est_loc_conf_t, verify_client),
-        &ngx_http_est_client_verify },
+        &ngx_http_est_enum_client_verify },
 
     /* Directives associated with CA operations */
 
@@ -382,7 +389,7 @@ ngx_http_est_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child) {
     ngx_conf_merge_value(conf->ca_validity_days, prev->ca_validity_days, 30);
     ngx_conf_merge_str_value(conf->csr_attrs, prev->csr_attrs, "");
     ngx_conf_merge_value(conf->enable, prev->enable, 0);
-    ngx_conf_merge_value(conf->http, prev->http, 0);
+    ngx_conf_merge_value(conf->http, prev->http, HTTP_DISALLOW);
     ngx_conf_merge_value(conf->pop, prev->pop, 0);
     ngx_conf_merge_value(conf->verify_client, prev->verify_client, VERIFY_NONE);
     ngx_conf_merge_ptr_value(conf->attributes, prev->attributes, NULL);

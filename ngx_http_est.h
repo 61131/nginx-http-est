@@ -15,6 +15,13 @@
 
 
 typedef enum {
+    HTTP_DISALLOW = 0,
+    HTTP_ALLOW = 1,
+    HTTP_LIMIT = 2,
+}
+ngx_http_est_http_e;
+
+typedef enum {
     VERIFY_NONE = 0,
     VERIFY_AUTHENTICATION = 1,
     VERIFY_CERTIFICATE = 2,
@@ -30,7 +37,7 @@ typedef struct {
     ngx_int_t   ca_validity_days;
     ngx_str_t   csr_attrs;
     ngx_flag_t  enable;
-    ngx_flag_t  http;
+    ngx_int_t   http; 
     ngx_flag_t  pop;
     ngx_int_t   verify_client;
 

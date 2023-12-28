@@ -390,7 +390,7 @@ ngx_http_est_request(ngx_http_request_t *r) {
     */
 
     if ((!r->connection->ssl) &&
-            (!lcf->http)) {
+            (lcf->http == HTTP_DISALLOW)) { 
         return NGX_HTTP_FORBIDDEN;
     }
 
@@ -427,33 +427,46 @@ ngx_http_est_request(ngx_http_request_t *r) {
         if ((rc = ngx_strcmp(d->name.data, uri)) != 0) {
             continue;
         }
-
-        ngx_log_error(NGX_LOG_INFO, r->connection->log, 0, "%s: \"%*s\"", 
-                MODULE_NAME,
-                (size_t)c, 
-                ptr);
-
         if ((d->method & r->method) == 0) {
             return NGX_HTTP_NOT_ALLOWED;
         }
-        if (d->verify) {
-            if ((lcf->verify_client & VERIFY_CERTIFICATE) != 0) {
-                if (!r->connection->ssl) {
-                    ngx_log_error(NGX_LOG_WARN, r->connection->log, 0, 
-                            "%s: cannot verify certificate as client using non-secure connection",
-                            MODULE_NAME);
-                    return NGX_HTTP_FORBIDDEN;
-                }
 
-                if (ngx_ssl_get_client_verify(r->connection, r->pool, &verify) != NGX_OK) {
-                    return NGX_HTTP_INTERNAL_SERVER_ERROR;
-                }
-                if (ngx_strcmp(verify.data, "SUCCESS") != 0) {
-                    ngx_log_error(NGX_LOG_WARN, r->connection->log, 0, 
-                            "%s: failed certificate verification",
-                            MODULE_NAME);
-                    return NGX_HTTP_FORBIDDEN;
-                }
+        ngx_log_error(NGX_LOG_INFO, r->connection->log, 0, "%s: \"%*s\"", 
+                MODULE_NAME,
+                ngx_strlen(uri),
+                uri);
+
+        /*
+            The following code implements controls around access to certain EST end-
+            points based upon (client certificate) verification status (as HTTP
+            authentication access is verified within the ACCESS_PHASE handler) and 
+            whether the request has been received via unsecured HTTP (where access to 
+            verified functions is only permitted via HTTPS).
+        */
+
+        if (!d->verify) {
+            break;
+        }
+        if ((!r->connection->ssl) &&
+              (lcf->http == HTTP_LIMIT)) { 
+            return NGX_HTTP_NOT_ALLOWED;
+        }
+        if ((lcf->verify_client & VERIFY_CERTIFICATE) != 0) {
+            if (!r->connection->ssl) {
+                ngx_log_error(NGX_LOG_WARN, r->connection->log, 0, 
+                        "%s: cannot verify certificate as client using non-secure connection",
+                        MODULE_NAME);
+                return NGX_HTTP_FORBIDDEN;
+            }
+
+            if (ngx_ssl_get_client_verify(r->connection, r->pool, &verify) != NGX_OK) {
+                return NGX_HTTP_INTERNAL_SERVER_ERROR;
+            }
+            if (ngx_strcmp(verify.data, "SUCCESS") != 0) {
+                ngx_log_error(NGX_LOG_WARN, r->connection->log, 0, 
+                        "%s: failed certificate verification",
+                        MODULE_NAME);
+                return NGX_HTTP_FORBIDDEN;
             }
         }
 

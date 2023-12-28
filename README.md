@@ -178,7 +178,7 @@ This information will be used both in the validation of CSRs received from clien
 
 ### est_http
 
-* **syntax:** `est_http on|off`
+* **syntax:** `est_http on|off|limit`
 * **default:** `off`
 * **content:** `location`
 
@@ -187,6 +187,8 @@ Permits HTTP requests to be used for EST operations.
 When enabled, this option allows the EST server to receive and process requests over both TLS-secured HTTP (HTTPS) and unsecured HTTP. While [RFC 7030](https://datatracker.ietf.org/doc/html/rfc7030) only describes the use of a TLS-secured HTTP session for EST operations, the use of unsecured HTTP may be useful where a device lacks bootstrap client TLS certificates. This mode of operations is also useful to provide visibility of EST operations for development and debugging purposes.
 
 It is important to note that EST operations dependent upon TLS will be non-operational where these are performed over unsecured HTTP - These operations include certificate-based authentication and client demonstration of the proof-of-possession (POP) of the private key associated with a certificate signing request (CSR).
+
+Where the value of `limit` is employed for this configuration parameter, access via unsecured HTTP will be restricted to only those end-points not requiring client verification ("/cacerts" and "/csrattrs").
 
 ### est_pop
 

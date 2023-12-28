@@ -44,7 +44,8 @@ Note that the nginx-http-est module is dependent upon the HTTP SSL module for no
             est on;
             est_auth_request /auth-backend;
             est_csr_attrs /etc/nginx/ssl/csrattrs.der;
-            est_pop off;
+            est_http off;
+            est_pop on;
             est_root_certificate /etc/nginx/ssl/Org-RootCA.crt;
             est_verify_client cert;
 
@@ -184,7 +185,7 @@ This information will be used both in the validation of CSRs received from clien
 
 Permits HTTP requests to be used for EST operations.
 
-While [RFC 7030](https://datatracker.ietf.org/doc/html/rfc7030) describes the use of a TLS-secured HTTP session for EST operations, the use of unsecured HTTP may be useful where a device lacks bootstrap client TLS certificates. This mode of operations is also useful to provide visibility of EST operations for development and debugging purposes.
+While [RFC 7030](https://datatracker.ietf.org/doc/html/rfc7030) describes the use of a TLS-secured HTTP session for EST operations, the use of unsecured HTTP may be useful where a device lacks bootstrap client TLS certificates. This mode of operations is also useful to provide visibility of EST operations for development and debugging purposes. The use of this option will prevent the EST server from undertaking operations dependent upon SSL operations - These operations include certificate-based authentication and client demonstration of the proof-of-possession of the private key associated with a certificate signing request.
 
 ### est_pop
 

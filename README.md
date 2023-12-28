@@ -185,7 +185,9 @@ This information will be used both in the validation of CSRs received from clien
 
 Permits HTTP requests to be used for EST operations.
 
-While [RFC 7030](https://datatracker.ietf.org/doc/html/rfc7030) describes the use of a TLS-secured HTTP session for EST operations, the use of unsecured HTTP may be useful where a device lacks bootstrap client TLS certificates. This mode of operations is also useful to provide visibility of EST operations for development and debugging purposes. The use of this option will prevent the EST server from undertaking operations dependent upon SSL operations - These operations include certificate-based authentication and client demonstration of the proof-of-possession of the private key associated with a certificate signing request.
+When enabled, this option allows the EST server to receive and process requests over both TLS-secured HTTP (HTTPS) and unsecured HTTP. While [RFC 7030](https://datatracker.ietf.org/doc/html/rfc7030) only describes the use of a TLS-secured HTTP session for EST operations, the use of unsecured HTTP may be useful where a device lacks bootstrap client TLS certificates. This mode of operations is also useful to provide visibility of EST operations for development and debugging purposes.
+
+It is important to note that EST operations dependent upon TLS will be non-operational where these are performed over unsecured HTTP - These operations include certificate-based authentication and client demonstration of the proof-of-possession (POP) of the private key associated with a certificate signing request (CSR).
 
 ### est_pop
 
@@ -193,7 +195,7 @@ While [RFC 7030](https://datatracker.ietf.org/doc/html/rfc7030) describes the us
 * **default:** `off`
 * **content:** `location`
 
-Requires client demonstrate proof-of-possession (POP) of the private key associated with the submitted certificate signing request (CSR).
+Requires client demonstrate proof-of-possession (POP) of the private key associated with the certificate signing request (CSR).
 
 This directive requires that all clients demonstrate the proof-of-possession (POP) of the private key associated with a certificate signing request (CSR) and that the client was able to sign the CSR after the TLS session was established. This demonstration requires the client to include the tls-unique value from the TLS subsystem as described in [RFC 5929](https://datatracker.ietf.org/doc/html/rfc5929) as an attribute within the CSR.
 

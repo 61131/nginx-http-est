@@ -24,7 +24,7 @@ To build the nginx-http-est module from the Nginx source directory:
     make
     make install
 
-Note that the nginx-http-est module is dependent upon the HTTP SSL module for normal operations. 
+Note that the nginx-http-est module is dependent upon the HTTP SSL module for normal operations. If the HTTP SSL module is not included within the nginx server configuration, client TLS certificate authentication and proof-of-possession (POP) functionality will not be available.
 
 ## Configuration
 
@@ -193,9 +193,9 @@ While [RFC 7030](https://datatracker.ietf.org/doc/html/rfc7030) describes the us
 * **default:** `off`
 * **content:** `location`
 
-Requires client demonstrate proof-of-possession (POP) of private key.
+Requires client demonstrate proof-of-possession (POP) of the private key associated with the submitted certificate signing request (CSR).
 
-This directive requires that all clients demonstrate the proof-of-possession (POP) of the private key associated with a certification request and that the client was able to sign the certification request after the TLS session was established. This demonstration requires the client to include the tls-unique value from the TLS subsystem as described in [RFC 5929](https://datatracker.ietf.org/doc/html/rfc5929) as an attribute within the CSR.
+This directive requires that all clients demonstrate the proof-of-possession (POP) of the private key associated with a certificate signing request (CSR) and that the client was able to sign the CSR after the TLS session was established. This demonstration requires the client to include the tls-unique value from the TLS subsystem as described in [RFC 5929](https://datatracker.ietf.org/doc/html/rfc5929) as an attribute within the CSR.
 
 Where enabled, this directive requires the client to include the tls-unique value as a base64 encoded string in the certification request challenge-password field. If this attribute is missing or mismatched with that on the server, the certificate generation request will fail.
 
@@ -227,7 +227,7 @@ For HTTP-based authentication, the `est_auth_request` directive must be set with
 
 The following limitations are noted with respect to this EST server implementation:
 
-* The EST server does not support Transport Layer Security Secure Remote Password (TLS-SRP) for certificate-less TLS mutual authentication.
+* The EST server does not support Transport Layer Security Secure Remote Password (TLS-SRP) for certificate-less TLS mutual authentication. 
 * The EST server does not (yet) validate Subject field and SubjectAltName extension within certificate signing requests submitted for re-enrollment. This is primarily due to the limited meta-data persistence associated with certificate generation and renewal.
 
 ## References

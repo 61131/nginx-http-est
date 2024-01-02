@@ -16,9 +16,13 @@ static char * ngx_http_est_command_csr_attrs(ngx_conf_t *cf, ngx_command_t *cmd,
 
 static char * ngx_http_est_command_enable(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 
+static char * ngx_http_est_command_pop(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+
 static char * ngx_http_est_command_root_certificate(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 
 static void * ngx_http_est_create_loc_conf(ngx_conf_t *cf);
+
+static ngx_int_t ngx_http_est_match_attribute(ngx_http_est_loc_conf_t *lcf, ngx_str_t *str);
 
 static char * ngx_http_est_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child);
 
@@ -123,7 +127,7 @@ static ngx_command_t ngx_http_est_commands[] = {
 
     { ngx_string("est_pop"), 
         NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_conf_set_flag_slot,
+        ngx_http_est_command_pop,
         NGX_HTTP_LOC_CONF_OFFSET,
         offsetof(ngx_http_est_loc_conf_t, pop),
         NULL },
@@ -291,12 +295,58 @@ ngx_http_est_command_enable(ngx_conf_t *cf, ngx_command_t *cmd, void *conf) {
     if (rv != NGX_CONF_OK) {
         return rv;
     }
-
     if (lcf->enable) {
         clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
         clcf->handler = ngx_http_est_request;
     }
     return NGX_CONF_OK;
+}
+
+
+static char *
+ngx_http_est_command_pop(ngx_conf_t *cf, ngx_command_t *cmd, void *conf) {
+    ngx_http_est_loc_conf_t *lcf = conf;
+    ngx_str_t cp = ngx_string("challengePassword");
+    ngx_str_t *attribute;
+    char *rv;
+
+    /* assert((obj = OBJ_nid2obj(NID_pkcs9_challengePassword)) != NULL); */
+    /* assert(OBJ_obj2txt(buf, sizeof(buf), obj, 0) > 0); */
+
+    /* assert(lcf != NULL); */
+    rv = ngx_conf_set_flag_slot(cf, cmd, conf);
+    if (rv != NGX_CONF_OK) {
+        return rv;
+    }
+    if (lcf->pop) {
+
+        /*
+            When proof-of-possession is configured for the EST server, the object 
+            identifier for the challengePassword is included within the list of 
+            attributes mandated for certificate signing requests (CSR). Before this 
+            object identifier is added to this list of attributes however, a check is 
+            made to ensure that this object identifier is not already included.
+        */
+
+        rv = NGX_CONF_ERROR;
+        /* assert(ngx_http_est_match_attribute(lcf, &attr) >= 0); */
+        if (ngx_http_est_match_attribute(lcf, &cp) == 0) {
+            attribute = ngx_array_push(lcf->attributes);
+            if (attribute == NULL) {
+                goto error;
+            }
+            attribute->len = cp.len + 1;
+            attribute->data = ngx_pnalloc(cf->pool, attribute->len);
+            if (attribute->data == NULL) {
+                goto error;
+            }
+            (void) ngx_copy(attribute->data, cp.data, cp.len);
+        }
+    }
+
+    rv = NGX_CONF_OK;
+error:
+    return rv;
 }
 
 
@@ -352,6 +402,7 @@ ngx_http_est_create_loc_conf(ngx_conf_t *cf) {
     if (lcf == NULL) {
         return NULL;
     }
+    lcf->cf = cf;
 
     /*
         set by ngx_pcalloc():
@@ -374,6 +425,24 @@ ngx_http_est_create_loc_conf(ngx_conf_t *cf) {
     lcf->pkey = NGX_CONF_UNSET_PTR;
 
     return lcf;
+}
+
+
+static ngx_int_t
+ngx_http_est_match_attribute(ngx_http_est_loc_conf_t *lcf, ngx_str_t *str) {
+    ngx_uint_t i;
+
+    if (lcf->attributes == NULL) {
+        if ((lcf->attributes = ngx_array_create(lcf->cf->pool, 8, sizeof(ngx_str_t))) == NULL) {
+            return -1;
+        }
+    }
+    for (i = 0; i < lcf->attributes->nelts; ++i) {
+        if (ngx_strcmp(((ngx_str_t *) lcf->attributes->elts)[i].data, str->data) == 0) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 

@@ -30,6 +30,8 @@ typedef enum {
 ngx_http_est_verify_e;
 
 typedef struct {
+    ngx_conf_t  *cf;
+
     ngx_str_t   auth_request;
     ngx_str_t   ca_private_key;
     ngx_str_t   ca_root_certificate;
@@ -79,6 +81,8 @@ extern ngx_http_est_dispatch_t ngx_http_est_dispatch[];
 
 extern ngx_module_t ngx_http_est_module;
 
+
+ngx_int_t ngx_http_est_asn1_generate(ngx_array_t *array, unsigned char *data, size_t length);
 
 ngx_int_t ngx_http_est_asn1_parse(ngx_array_t *array, const unsigned char **data, size_t length, off_t offset);
 

@@ -271,15 +271,12 @@ ngx_http_est_command_csr_attrs(ngx_conf_t *cf, ngx_command_t *cmd, void *conf) {
         }
     }
 
-    buf->length = length;
-    lcf->buf = buf;
     rv = NGX_CONF_OK;
 
 error:
     BIO_free(in);
-    if (rv != NGX_CONF_OK) {
-        BUF_MEM_free(buf);
-    }
+    BUF_MEM_free(buf);
+
     return rv;
 }
 
@@ -378,7 +375,7 @@ ngx_http_est_command_root_certificate(ngx_conf_t *cf, ngx_command_t *cmd, void *
         goto error;
     }
     if (((bp = BIO_new_file(path, "r")) == NULL) ||
-            ((lcf->root = ngx_http_est_pkcs7(bp)) == NULL)) {
+            ((lcf->ca_root = ngx_http_est_pkcs7(bp)) == NULL)) {
         ngx_log_error(NGX_LOG_EMERG, cf->log, 0,
                 "%s: error opening root certificate: \"%*s\"",
                 MODULE_NAME,
@@ -413,16 +410,15 @@ ngx_http_est_create_loc_conf(ngx_conf_t *cf) {
             lcf->csr_attrs = { 0, NULL };
     */
 
-    lcf->ca_validity_days = NGX_CONF_UNSET;
     lcf->enable = NGX_CONF_UNSET;
     lcf->http = NGX_CONF_UNSET;
     lcf->pop = NGX_CONF_UNSET;
     lcf->verify_client = NGX_CONF_UNSET;
     lcf->attributes = NULL;
-    lcf->buf = NGX_CONF_UNSET_PTR;
-    lcf->root = NGX_CONF_UNSET_PTR;
-    lcf->x509 = NGX_CONF_UNSET_PTR;
-    lcf->pkey = NGX_CONF_UNSET_PTR;
+    lcf->ca_x509 = NGX_CONF_UNSET_PTR;
+    lcf->ca_key = NGX_CONF_UNSET_PTR;
+    lcf->ca_root = NGX_CONF_UNSET_PTR;
+    lcf->ca_validity_days = NGX_CONF_UNSET;
 
     return lcf;
 }
@@ -462,10 +458,9 @@ ngx_http_est_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child) {
     ngx_conf_merge_value(conf->pop, prev->pop, 0);
     ngx_conf_merge_value(conf->verify_client, prev->verify_client, VERIFY_NONE);
     ngx_conf_merge_ptr_value(conf->attributes, prev->attributes, NULL);
-    ngx_conf_merge_ptr_value(conf->buf, prev->buf, NULL);
-    ngx_conf_merge_ptr_value(conf->root, prev->root, NULL);
-    ngx_conf_merge_ptr_value(conf->x509, prev->x509, NULL);
-    ngx_conf_merge_ptr_value(conf->pkey, prev->pkey, NULL);
+    ngx_conf_merge_ptr_value(conf->ca_x509, prev->ca_x509, NULL);
+    ngx_conf_merge_ptr_value(conf->ca_key, prev->ca_key, NULL);
+    ngx_conf_merge_ptr_value(conf->ca_root, prev->ca_root, NULL);
     
     return NGX_CONF_OK;
 }

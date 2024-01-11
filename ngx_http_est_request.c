@@ -192,9 +192,6 @@ _ngx_http_est_request_parse_csr(ngx_http_request_t *r) {
         inclusion of these attributes. It is noted that this is an O(n*m) operation, 
         but that this performance should be acceptable given the pre-parsing of 
         attributes from the ASN.1 certificate byte sequence.
-
-        Note that lcf->attributes is only defined if the est_csr_attrs directive is
-        included in the location directive.
     */
 
     if (lcf->attributes != NULL) {  
@@ -436,14 +433,6 @@ ngx_http_est_request(ngx_http_request_t *r) {
                 ngx_strlen(uri),
                 uri);
 
-        /*
-            The following code implements controls around access to certain EST end-
-            points based upon (client certificate) verification status (as HTTP
-            authentication access is verified within the ACCESS_PHASE handler) and 
-            whether the request has been received via unsecured HTTP (where access to 
-            verified functions is only permitted via HTTPS).
-        */
-
         if (!d->verify) {
             break;
         }
@@ -531,7 +520,7 @@ ngx_http_est_request_cacerts(ngx_http_request_t *r, ngx_buf_t *b) {
 
     rc = NGX_ERROR;
     if (((bp = BIO_new(BIO_s_mem())) == NULL) ||
-            (!PEM_write_bio_PKCS7(bp, lcf->root))) {
+            (!PEM_write_bio_PKCS7(bp, lcf->ca_root))) {
         goto error;
     }
 
@@ -564,34 +553,110 @@ error:
 
 ngx_int_t 
 ngx_http_est_request_csrattrs(ngx_http_request_t *r, ngx_buf_t *b) {
+    ASN1_OBJECT *obj;
+    ASN1_TYPE *type;
+    BUF_MEM *buf;
+    STACK_OF(ASN1_TYPE) *sk;
     ngx_http_est_loc_conf_t *lcf;
     ngx_str_t str, res;
+    ngx_uint_t i;
+    ngx_int_t rc;
+    unsigned char *ptr;
+    long len;
+    size_t length;
 
     lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
-    /* assert(lcf != NULL); */
+    if (lcf == NULL) {
+        return NGX_DECLINED;
+    }
+
     r->headers_out.status = NGX_HTTP_NO_CONTENT;
     r->headers_out.content_type_len = sizeof("application/csrattrs") - 1;
     ngx_str_set(&r->headers_out.content_type, "application/csrattrs");
 
-    if ((lcf->buf != NULL) &&
-            (lcf->buf->length > 0)) {
-        str.len = lcf->buf->length;
-        str.data = (u_char *)lcf->buf->data;
-        res.len = ngx_base64_encoded_length(str.len);
-        res.data = ngx_pcalloc(r->pool, res.len + 2);
-        if (res.data == NULL) {
-            return NGX_ERROR;
-        }
-        ngx_encode_base64(&res, &str);
-        b->pos = b->last = res.data;
-        b->memory = 1;
-        b->last += res.len;
-        b->last = ngx_copy(b->last, CRLF, 2);
-
-        r->headers_out.status = NGX_HTTP_OK;
+    if ((lcf->attributes == NULL) ||
+            (lcf->attributes->nelts == 0)) {
+        return NGX_OK;
     }
 
-    return NGX_OK;
+    /*
+        The following generates an ASN.1 sequence of attributes which must be 
+        included in any certificate signing requests processed by the EST server.
+    */
+
+    rc = NGX_ERROR;
+    buf = NULL;
+    sk = NULL;
+    type = NULL;
+
+    if ((buf = BUF_MEM_new()) == NULL) {
+        goto error;
+    }
+
+    if ((sk = sk_ASN1_TYPE_new_null()) == NULL) {
+        goto error;
+    }
+    for (i = 0; i < lcf->attributes->nelts; ++i) {
+        if ((type = ASN1_TYPE_new()) == NULL) {
+            goto error;
+        }
+        if ((obj = OBJ_txt2obj((const char *)((ngx_str_t *)lcf->attributes->elts)[i].data, 0)) == NULL) {
+            goto error;
+        }
+        type->type = V_ASN1_OBJECT;
+        type->value.object = obj;
+
+        if (!sk_ASN1_TYPE_push(sk, type)) {
+            goto error;
+        }
+        type = NULL;
+    }
+
+    ptr = NULL;
+    if ((len = i2d_ASN1_SEQUENCE_ANY(sk, &ptr)) < 0) {
+        goto error;
+    }
+    if ((type = ASN1_TYPE_new()) == NULL) {
+        goto error;
+    }
+    if ((type->value.asn1_string = ASN1_STRING_type_new(V_ASN1_SEQUENCE)) == NULL) {
+        goto error;
+    }
+    type->type = V_ASN1_SEQUENCE;
+    type->value.asn1_string->data = ptr;
+    type->value.asn1_string->length = len;
+
+    length = i2d_ASN1_TYPE(type, NULL);
+    if (!BUF_MEM_grow(buf, length)) {
+        goto error;
+    }
+    ptr = (unsigned char *) buf->data;
+    length = i2d_ASN1_TYPE(type, &ptr);
+    ASN1_TYPE_free(type);
+    type = NULL;
+
+    str.len = buf->length;
+    str.data = (u_char *) buf->data;
+    res.len = ngx_base64_encoded_length(str.len);
+    res.data = ngx_pcalloc(r->pool, res.len + 2);
+    if (res.data == NULL) {
+        goto error;
+    }
+    ngx_encode_base64(&res, &str);
+    b->pos = b->last = res.data;
+    b->memory = 1;
+    b->last += res.len;
+    b->last = ngx_copy(b->last, CRLF, 2);
+
+    r->headers_out.status = NGX_HTTP_OK;
+    rc = NGX_OK;
+
+error:
+    OPENSSL_free(type);
+    sk_ASN1_TYPE_pop_free(sk, ASN1_TYPE_free);
+    BUF_MEM_free(buf);
+
+    return rc;
 }
 
 

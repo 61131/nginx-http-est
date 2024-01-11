@@ -43,21 +43,17 @@ typedef struct {
     ngx_flag_t  pop;
     ngx_int_t   verify_client;
 
-    /* array(ngx_str_t) CSR attributes */
     ngx_array_t *attributes;
-    /* BUF_MEM CSR attributes, DER encoded */
-    BUF_MEM     *buf;
-    /* PKCS7 root certificate */
-    PKCS7       *root;
 
     /*
         The following members of this data structure are pointers to the certificate 
         authority (CA) X.509 certificate and associated private key which are used 
-        for signing issued certificates.
+        for signing issued certificates. 
     */
 
-    X509        *x509;
-    EVP_PKEY    *pkey;
+    X509        *ca_x509;   //  Unused optimisation
+	EVP_PKEY    *ca_key;    //  Unused optimisation
+    PKCS7       *ca_root;
 }
 ngx_http_est_loc_conf_t;
 
@@ -81,8 +77,6 @@ extern ngx_http_est_dispatch_t ngx_http_est_dispatch[];
 
 extern ngx_module_t ngx_http_est_module;
 
-
-ngx_int_t ngx_http_est_asn1_generate(ngx_array_t *array, unsigned char *data, size_t length);
 
 ngx_int_t ngx_http_est_asn1_parse(ngx_array_t *array, const unsigned char **data, size_t length, off_t offset);
 

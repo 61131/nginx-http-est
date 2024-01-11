@@ -158,4 +158,3 @@ ngx_http_est_auth(ngx_http_request_t *r) {
     return NGX_HTTP_INTERNAL_SERVER_ERROR;
 }
 
-

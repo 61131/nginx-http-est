@@ -311,6 +311,13 @@ ngx_http_est_x509_generate(ngx_http_request_t *r, X509_REQ *req) {
 
     EVP_PKEY_free(pkey);
     ASN1_INTEGER_free(serial);
+
+    ngx_log_error(NGX_LOG_NOTICE, r->connection->log, 0,
+            "%s: certificate: \"%s\", subject: \"%s\"",
+            MODULE_NAME,
+            i2s_ASN1_INTEGER(NULL, X509_get0_serialNumber(cert)),
+            X509_NAME_oneline(X509_get_subject_name(cert), 0, 0));
+
     return cert;
 
 error:

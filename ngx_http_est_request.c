@@ -9,6 +9,8 @@
 
 #include "ngx_http_est.h"
 
+#define _MIME_BOUNDARY_STRING   "est-boundary"
+
 
 static ngx_buf_t * _ngx_http_est_request_body(ngx_http_request_t *r);
 
@@ -227,10 +229,24 @@ error:
 
 static void 
 _ngx_http_est_request_serverkeygen(ngx_http_request_t *r) {
+    BIO *pem, *pkcs7, *pkcs8;
+    BUF_MEM *ptr7, *ptr8;
+    EVP_PKEY *pkey;
+    PKCS7 *p7;
+    PKCS8_PRIV_KEY_INFO *p8;
+    X509 *cert;
     X509_REQ *req;
+    ngx_buf_t *b;
+    ngx_chain_t out;
     ngx_int_t rc;
+    u_char *content;
+    size_t length;
 
-    rc = NGX_HTTP_BAD_REQUEST;
+    rc = NGX_HTTP_INTERNAL_SERVER_ERROR;
+    pem = pkcs7 = pkcs8 = NULL;
+    ptr7 = ptr8 = NULL;
+    cert = NULL;
+    pkey = NULL;
 
     /*
         This function implements handling for the HTTP request body submitted to 
@@ -245,10 +261,112 @@ _ngx_http_est_request_serverkeygen(ngx_http_request_t *r) {
     */
 
     if ((req = _ngx_http_est_request_parse_csr(r)) == NULL) {
+        rc = NGX_HTTP_BAD_REQUEST;
         goto error;
     }
 
+    if ((pkey = ngx_http_est_privkey(r)) == NULL) {
+        goto error;
+    }
+    if (!X509_REQ_set_pubkey(req, pkey)) {
+        goto error;
+    }
+    if ((cert = ngx_http_est_x509_generate(r, req)) == NULL) {
+        goto error;
+    }
+
+    /*
+        The following code will generate the multipart/mixed response containing the 
+        server-generated private key (application/pkcs8) and certificate 
+        (application/pkcs7-mime).
+
+            "--%s" CRLF
+            "Content-Type: application/pkcs8" CRLF CRLF
+            "--%s" CRLF
+            "Content-Type: application/pkcs7-mime" CRLF CRLF
+            "--%s--" CRLF
+    */
+
+    length = (ngx_strlen(_MIME_BOUNDARY_STRING) * 3) +
+            ngx_strlen("Content-Type: application/pkcs7-mime") +
+            ngx_strlen("Content-Type: application/pkcs8") +
+            (ngx_strlen(CRLF) * 7) +
+            /* '-' */ 8;
+
+    if (((pem = BIO_new(BIO_s_mem())) == NULL) ||
+            (!PEM_write_bio_X509(pem, cert))) {
+        goto error;
+    }
+    BIO_seek(pem, 0);
+    if ((p7 = ngx_http_est_pkcs7(pem)) == NULL) {
+        goto error;
+    }
+    if (((pkcs7 = BIO_new(BIO_s_mem())) == NULL) ||
+            (!PEM_write_bio_PKCS7(pkcs7, p7))) {
+        goto error;
+    }
+    BIO_get_mem_ptr(pkcs7, &ptr7);
+    /* assert(ptr7 != NULL); */
+    /* assert(ptr7->length > 42); */
+    length += (ptr7->length - 42);
+
+    if ((p8 = EVP_PKEY2PKCS8(pkey)) == NULL) {
+        goto error;
+    }
+    if (((pkcs8 = BIO_new(BIO_s_mem())) == NULL) ||
+            (!PEM_write_bio_PKCS8_PRIV_KEY_INFO(pkcs8, p8))) {
+        goto error;
+    }
+    BIO_get_mem_ptr(pkcs8, &ptr8);
+    /* assert(ptr8 != NULL); */
+    /* assert(ptr8->length > 54); */
+    length += (ptr8->length - 54);
+
+    if ((content = ngx_pcalloc(r->pool, length)) == NULL) {
+        goto error;
+    }
+    b = ngx_pcalloc(r->pool, sizeof(ngx_buf_t));
+    if (b == NULL) {
+        goto error;
+    }
+    b->pos = b->last = content;
+    b->memory = 1;
+
+    b->last = ngx_sprintf(b->last, 
+            "--%s" CRLF
+            "Content-Type: application/pkcs7-mime" CRLF CRLF,
+            _MIME_BOUNDARY_STRING);
+    b->last = ngx_copy(b->last, ptr7->data + 22, ptr7->length - 42);
+    b->last = ngx_sprintf(b->last,
+            "--%s" CRLF 
+            "Content-Type: application/pkcs8" CRLF CRLF,
+            _MIME_BOUNDARY_STRING);
+    b->last = ngx_copy(b->last, ptr8->data + 28, ptr8->length - 54);
+    b->last = ngx_sprintf(b->last,
+            "--%s--" CRLF,
+            _MIME_BOUNDARY_STRING);
+    b->last_buf = (r == r->main) ? 1 : 0;
+
+    out.buf = b;
+    out.next = NULL;
+
+    ngx_str_set(&r->headers_out.content_type, "multipart/mixed; boundary=" _MIME_BOUNDARY_STRING);
+    r->headers_out.content_type_len = r->headers_out.content_type.len;
+    r->headers_out.content_type_lowcase = NULL;
+    r->headers_out.status = NGX_HTTP_OK;
+    r->headers_out.content_length_n = b->last - b->pos;
+
+    rc = ngx_http_send_header(r);
+    if ((r->header_only) ||
+            (rc == NGX_ERROR) ||
+            (rc > NGX_OK)) {
+        goto error;
+    }
+    rc = ngx_http_output_filter(r, &out);
+
 error:
+    X509_free(cert);
+    EVP_PKEY_free(pkey);
     X509_REQ_free(req);
 
     ngx_http_finalize_request(r, rc);
@@ -287,11 +405,6 @@ _ngx_http_est_request_simple(ngx_http_request_t *r) {
     if ((cert = ngx_http_est_x509_generate(r, req)) == NULL) {
         goto error;
     }
-    ngx_log_error(NGX_LOG_NOTICE, r->connection->log, 0,
-            "%s: certificate: \"%s\", subject: \"%s\"",
-            MODULE_NAME,
-            i2s_ASN1_INTEGER(NULL, X509_get0_serialNumber(cert)),
-            X509_NAME_oneline(X509_get_subject_name(cert), 0, 0));
 
     /*
         The following code will write the newly generated certificate into a memory 
@@ -302,7 +415,6 @@ _ngx_http_est_request_simple(ngx_http_request_t *r) {
             (!PEM_write_bio_X509(pem, cert))) {
         goto error;
     }
-    /* length = BIO_get_mem_data(pem, &pp); */
     BIO_seek(pem, 0);
     if ((p7 = ngx_http_est_pkcs7(pem)) == NULL) {
         goto error;
@@ -313,10 +425,6 @@ _ngx_http_est_request_simple(ngx_http_request_t *r) {
     }
 
     BIO_get_mem_ptr(pkcs7, &ptr);
-    /* assert(ptr != NULL); */
-    /* assert(ptr->length > 42); */
-    /* assert(ngx_strncmp(ptr->data, "-----BEGIN PKCS7-----\n", 22) == 0); */
-    /* assert(ngx_strncmp(..., "-----END PKCS7-----\n", 20) == 0); */
     length = ptr->length - 42;
     if ((content = ngx_pcalloc(r->pool, length)) == NULL) {
         goto error;
@@ -333,8 +441,8 @@ _ngx_http_est_request_simple(ngx_http_request_t *r) {
     out.buf = b;
     out.next = NULL;
 
-    r->headers_out.content_type_len = sizeof("application/pkcs7-mime") - 1;
     ngx_str_set(&r->headers_out.content_type, "application/pkcs7-mime");
+    r->headers_out.content_type_len = r->headers_out.content_type.len;
     r->headers_out.content_type_lowcase = NULL;
     r->headers_out.status = NGX_HTTP_OK;
     r->headers_out.content_length_n = b->last - b->pos;
@@ -343,8 +451,7 @@ _ngx_http_est_request_simple(ngx_http_request_t *r) {
     if ((r->header_only) ||
             (rc == NGX_ERROR) ||
             (rc > NGX_OK)) {
-        ngx_http_finalize_request(r, rc);
-        return;
+        goto error;
     }
     rc = ngx_http_output_filter(r, &out);
 error:
@@ -514,9 +621,10 @@ ngx_http_est_request_cacerts(ngx_http_request_t *r, ngx_buf_t *b) {
         return NGX_DECLINED;
     }
 
-    r->headers_out.status = NGX_HTTP_OK;
-    r->headers_out.content_type_len = sizeof("application/pkcs7-mime") - 1;
     ngx_str_set(&r->headers_out.content_type, "application/pkcs7-mime");
+    r->headers_out.content_type_len = r->headers_out.content_type.len;
+    r->headers_out.content_type_lowcase = NULL;
+    r->headers_out.status = NGX_HTTP_OK;
 
     rc = NGX_ERROR;
     if (((bp = BIO_new(BIO_s_mem())) == NULL) ||
@@ -531,10 +639,6 @@ ngx_http_est_request_cacerts(ngx_http_request_t *r, ngx_buf_t *b) {
     */
 
     BIO_get_mem_ptr(bp, &ptr);
-    /* assert(ptr != NULL); */
-    /* assert(ptr->length > 42); */
-    /* assert(ngx_strncmp(ptr->data, "-----BEGIN PKCS7-----\n", 22) == 0); */
-    /* assert(ngx_strncmp(..., "-----END PKCS7-----\n", 20) == 0); */
     length = ptr->length - 42;
     if ((content = ngx_pcalloc(r->pool, length)) == NULL) {
         goto error;
@@ -542,6 +646,7 @@ ngx_http_est_request_cacerts(ngx_http_request_t *r, ngx_buf_t *b) {
     b->pos = b->last = content;
     b->memory = 1;
     b->last = ngx_copy(b->last, ptr->data + 22, length);
+    r->headers_out.content_length_n = b->last - b->pos;
 
     rc = NGX_OK;
 
@@ -570,14 +675,10 @@ ngx_http_est_request_csrattrs(ngx_http_request_t *r, ngx_buf_t *b) {
         return NGX_DECLINED;
     }
 
-    r->headers_out.status = NGX_HTTP_NO_CONTENT;
-    r->headers_out.content_type_len = sizeof("application/csrattrs") - 1;
     ngx_str_set(&r->headers_out.content_type, "application/csrattrs");
-
-    if ((lcf->attributes == NULL) ||
-            (lcf->attributes->nelts == 0)) {
-        return NGX_OK;
-    }
+    r->headers_out.content_type_len = r->headers_out.content_type.len;
+    r->headers_out.content_type_lowcase = NULL;
+    r->headers_out.status = NGX_HTTP_NO_CONTENT;
 
     /*
         The following generates an ASN.1 sequence of attributes which must be 
@@ -596,20 +697,22 @@ ngx_http_est_request_csrattrs(ngx_http_request_t *r, ngx_buf_t *b) {
     if ((sk = sk_ASN1_TYPE_new_null()) == NULL) {
         goto error;
     }
-    for (i = 0; i < lcf->attributes->nelts; ++i) {
-        if ((type = ASN1_TYPE_new()) == NULL) {
-            goto error;
-        }
-        if ((obj = OBJ_txt2obj((const char *)((ngx_str_t *)lcf->attributes->elts)[i].data, 0)) == NULL) {
-            goto error;
-        }
-        type->type = V_ASN1_OBJECT;
-        type->value.object = obj;
+    if (lcf->attributes != NULL) {
+        for (i = 0; i < lcf->attributes->nelts; ++i) {
+            if ((type = ASN1_TYPE_new()) == NULL) {
+                goto error;
+            }
+            if ((obj = OBJ_txt2obj((const char *)((ngx_str_t *)lcf->attributes->elts)[i].data, 0)) == NULL) {
+                goto error;
+            }
+            type->type = V_ASN1_OBJECT;
+            type->value.object = obj;
 
-        if (!sk_ASN1_TYPE_push(sk, type)) {
-            goto error;
+            if (!sk_ASN1_TYPE_push(sk, type)) {
+                goto error;
+            }
+            type = NULL;
         }
-        type = NULL;
     }
 
     ptr = NULL;
@@ -647,8 +750,9 @@ ngx_http_est_request_csrattrs(ngx_http_request_t *r, ngx_buf_t *b) {
     b->memory = 1;
     b->last += res.len;
     b->last = ngx_copy(b->last, CRLF, 2);
-
+    r->headers_out.content_length_n = b->last - b->pos;
     r->headers_out.status = NGX_HTTP_OK;
+
     rc = NGX_OK;
 
 error:

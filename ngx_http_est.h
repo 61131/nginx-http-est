@@ -84,6 +84,8 @@ ngx_int_t ngx_http_est_auth(ngx_http_request_t *r);
 
 PKCS7 * ngx_http_est_pkcs7(BIO *bp);
 
+EVP_PKEY * ngx_http_est_privkey(ngx_http_request_t *r);
+
 ngx_int_t ngx_http_est_request(ngx_http_request_t *r);
 
 ngx_int_t ngx_http_est_request_cacerts(ngx_http_request_t *r, ngx_buf_t *b);

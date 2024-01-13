@@ -10,8 +10,8 @@ The nginx-http-est module provides EST functionality for a Nginx server.
 
 * Distribution of CA certificates
 * Client certificate request functions
-* ~~Full Certificate Management over CMS (CMC)~~
-* ~~Server-side key generation~~ (Work in progress)
+* ~~Full Certificate Management over CMS (CMC)~~ (Not implemented)
+* Server-side key generation
 * CSR attributes
 * TLS certificate and HTTP-based authentication
 * Proof-of-possession (POP) validation
@@ -231,6 +231,7 @@ For HTTP-based authentication, the `est_auth_request` directive must be set with
 The following limitations are noted with respect to this EST server implementation:
 
 * The EST server does not support Transport Layer Security Secure Remote Password (TLS-SRP) for certificate-less TLS mutual authentication. 
+* The EST server does not support the additional symmetric or asymmetric encryption of the server-generated private key with encryption outside of that provided by the TLS transport.
 * The EST server does not (yet) validate Subject field and SubjectAltName extension within certificate signing requests submitted for re-enrollment. This is primarily due to the limited meta-data persistence associated with certificate generation and renewal.
 
 ## References
@@ -238,4 +239,5 @@ The following limitations are noted with respect to this EST server implementati
 * [RFC 7030 Enrollment over Secure Transport](https://datatracker.ietf.org/doc/html/rfc7030)
 * [RFC 8295 EST (Enrollment over Secure Transport) Extensions](https://datatracker.ietf.org/doc/html/rfc8295)
 * [RFC 8951 Clarification of Enrollment over Secure Transport (EST): Transfer Encodings and ASN.1](https://datatracker.ietf.org/doc/html/rfc8951)
+* [RFC 1341 MIME (Multipurpose Internet Mail Extensions): Mechanisms for Specifying and Describing the Format of Internet Message Bodies](https://datatracker.ietf.org/doc/html/rfc1341)
 

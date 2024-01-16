@@ -240,5 +240,4 @@ The following limitations are noted with respect to this EST server implementati
 * [RFC 7894 Alternative Challenge Password Attributes for Enrollment over Secure Transport](https://datatracker.ietf.org/doc/html/rfc7894)
 * [RFC 8295 EST (Enrollment over Secure Transport) Extensions](https://datatracker.ietf.org/doc/html/rfc8295)
 * [RFC 8951 Clarification of Enrollment over Secure Transport (EST): Transfer Encodings and ASN.1](https://datatracker.ietf.org/doc/html/rfc8951)
-* [RFC 1341 MIME (Multipurpose Internet Mail Extensions): Mechanisms for Specifying and Describing the Format of Internet Message Bodies](https://datatracker.ietf.org/doc/html/rfc1341)
-
+* [draft-ietf-lamps-rfc7030-csrattrs-07 Clarification of RFC7030 CSR Attributes definition](https://www.ietf.org/archive/id/draft-ietf-lamps-rfc7030-csrattrs-07.html)

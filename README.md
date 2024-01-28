@@ -44,6 +44,7 @@ Note that the nginx-http-est module is dependent upon the HTTP SSL module for no
             est on;
             est_auth_request /auth-backend;
             est_csr_attrs /etc/nginx/ssl/csrattrs.der;
+            est_legacy on
             est_pop on;
             est_root_certificate /etc/nginx/ssl/Org-RootCA.crt;
             est_verify_client cert;
@@ -121,7 +122,7 @@ This directive specifies the certificate - in PEM format - to be used for signin
 
 * **syntax:** `est_ca_serial_number <filename>`
 * **default:** `none`
-* **content:** `location`
+* **context:** `location`
 
 Configures the path where the CA sequential certificate serial number is stored.
 
@@ -149,15 +150,17 @@ Specifies a file containing certificate attributes that should be provided by cl
 
 CA policy may allow inclusion of client-provided attributes in certificates that is issues, and some of these attributes may describe information that is not available to the CA. Examples may include the Media Access Control (MAC) address of the client device or the intended application use of the certificate.
 
-This parameter specifies a file containing an ASN.1 encoded structure, in Distinguished Encoding Rules (DER) format, that specifies objects and attributes which should be provided by clients. This ASN.1 encoded structure should take the form as described in [RFC 8951](https://datatracker.ietf.org/doc/html/rfc8951):
+This parameter specifies a file containing an ASN.1 encoded structure, in Distinguished Encoding Rules (DER) format, that specifies objects and attributes which should be provided by clients. This ASN.1 encoded structure should take the form as described in [RFC 7030](https://datatracker.ietf.org/doc/html/rfc7030) and subsequent documents:
 
     CsrAttrs ::= SEQUENCE SIZE (0..Max) OF AttrOrOID
     
     AttrOrOID ::= CHOICE {
-      oid        OBJECT IDENTIFIER,
-      attribute  Attribute {{AttrSet}} }
+      oid       OBJECT IDENTIFIER,
+      attribute Attribute }
 
-    AttrSet ATTRIBUTE ::= { ... }
+    Attribute { ATTRIBUTE:IOSet } ::= SEQUENCE {
+      type      ATTRIBUTE.&id({IOSet}),
+      values    SET SIZE(1..MAX) OF ATTRIBUTE.&Type({IOSet}{@type}) }
 
 See OpenSSL [asn1parse](https://www.openssl.org/docs/man1.1.1/man1/openssl-asn1parse.html) for details on how to create this ASN.1 specification. 
 
@@ -180,7 +183,7 @@ This information will be used both in the validation of CSRs received from clien
 
 * **syntax:** `est_http on|off|limit`
 * **default:** `off`
-* **content:** `location`
+* **context:** `location`
 
 Permits HTTP requests to be used for EST operations.
 
@@ -190,11 +193,21 @@ It is important to note that EST operations dependent upon TLS will be non-opera
 
 Where the value of `limit` is employed for this configuration parameter, access via unsecured HTTP will be restricted to only those end-points not requiring client verification ("/cacerts" and "/csrattrs").
 
+### est_legacy
+
+* **syntax:** `est_legacy on|off`
+* **default:** `off`
+* **context:** `location`
+
+Enable compatibility with legacy EST clients.
+
+When enabled, this options includes the Content-Transfer-Encoding header in response messages as specified in [RFC 7030](https://datatracker.ietf.org/doc/html/rfc7030). This is required for compatibility with legacy EST clients which have not been updated in line with [RFC 8951](https://datatracker.ietf.org/doc/html/rfc8951) and [RFC 2616](https://datatracker.ietf.org/doc/html/rfc2616) which deprecates the use of this header.
+
 ### est_pop
 
 * **syntax:** `est_pop on|off`
 * **default:** `off`
-* **content:** `location`
+* **context:** `location`
 
 Requires client demonstrate proof-of-possession (POP) of the private key associated with the certificate signing request (CSR).
 
@@ -206,7 +219,7 @@ Where enabled, this directive requires the client to include the tls-unique valu
 
 * **syntax:** `est_root_certificate <filename>`
 * **default:** `none`
-* **content:** `location`
+* **context:** `location`
 
 Configures the certificate authority trust anchor to be used for EST operations.
 

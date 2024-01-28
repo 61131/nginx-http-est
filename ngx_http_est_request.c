@@ -33,11 +33,15 @@ _ngx_http_est_request_body(ngx_http_request_t *r) {
         on success, NULL on failure.
     */
 
+    if ((r->request_body == NULL) ||
+            (r->request_body->bufs == NULL)) {
+        return NULL;
+    }
+
     len = 0;
     for (in = r->request_body->bufs; in; in = in->next) {
         len += ngx_buf_size(in->buf);
     }
-
     b = ngx_create_temp_buf(r->pool, len);
     if (b != NULL) {
         for (in = r->request_body->bufs; in; in = in->next) {
@@ -72,10 +76,6 @@ _ngx_http_est_request_parse_csr(ngx_http_request_t *r) {
 
     lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
     /* assert(lcf != NULL); */
-    if ((r->request_body == NULL) ||
-            (r->request_body->bufs == NULL)) {
-        return NULL;
-    }
     if ((body = _ngx_http_est_request_body(r)) == NULL) {
         return NULL;
     }
@@ -229,6 +229,7 @@ error:
 
 static void 
 _ngx_http_est_request_serverkeygen(ngx_http_request_t *r) {
+    ngx_http_est_loc_conf_t *lcf;
     BIO *pem, *pkcs7, *pkcs8;
     BUF_MEM *ptr7, *ptr8;
     EVP_PKEY *pkey;
@@ -260,12 +261,14 @@ _ngx_http_est_request_serverkeygen(ngx_http_request_t *r) {
         to the client.
     */
 
+    lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
+    /* assert(lcf != NULL); */
     if ((req = _ngx_http_est_request_parse_csr(r)) == NULL) {
         rc = NGX_HTTP_BAD_REQUEST;
         goto error;
     }
 
-    if ((pkey = ngx_http_est_privkey(r)) == NULL) {
+    if ((pkey = ngx_http_est_privkey(r, req)) == NULL) {
         goto error;
     }
     if (!X509_REQ_set_pubkey(req, pkey)) {
@@ -292,6 +295,9 @@ _ngx_http_est_request_serverkeygen(ngx_http_request_t *r) {
             ngx_strlen("Content-Type: application/pkcs8") +
             (ngx_strlen(CRLF) * 7) +
             /* '-' */ 8;
+    if (lcf->legacy) {
+        length += (ngx_strlen("Content-Transfer-Encoding: base64" CRLF)) * 2;
+    }
 
     if (((pem = BIO_new(BIO_s_mem())) == NULL) ||
             (!PEM_write_bio_X509(pem, cert))) {
@@ -332,15 +338,25 @@ _ngx_http_est_request_serverkeygen(ngx_http_request_t *r) {
     b->pos = b->last = content;
     b->memory = 1;
 
-    b->last = ngx_sprintf(b->last, 
+    b->last = ngx_sprintf(b->last,
             "--%s" CRLF
-            "Content-Type: application/pkcs7-mime" CRLF CRLF,
+            "Content-Type: application/pkcs7-mime" CRLF,
             _MIME_BOUNDARY_STRING);
+
+    if (lcf->legacy) {
+        b->last = ngx_sprintf(b->last, "Content-Transfer-Encoding: base64" CRLF);
+    }
+    b->last = ngx_copy(b->last, CRLF, 2);
     b->last = ngx_copy(b->last, ptr7->data + 22, ptr7->length - 42);
     b->last = ngx_sprintf(b->last,
             "--%s" CRLF 
-            "Content-Type: application/pkcs8" CRLF CRLF,
+            "Content-Type: application/pkcs8" CRLF,
             _MIME_BOUNDARY_STRING);
+
+    if (lcf->legacy) {
+        b->last = ngx_sprintf(b->last, "Content-Transfer-Encoding: base64" CRLF);
+    }
+    b->last = ngx_copy(b->last, CRLF, 2);
     b->last = ngx_copy(b->last, ptr8->data + 28, ptr8->length - 54);
     b->last = ngx_sprintf(b->last,
             "--%s--" CRLF,
@@ -375,6 +391,7 @@ error:
 
 static void
 _ngx_http_est_request_simple(ngx_http_request_t *r) {
+    ngx_http_est_loc_conf_t *lcf;
     BIO *pem, *pkcs7;
     BUF_MEM *ptr;
     PKCS7 *p7;
@@ -382,6 +399,7 @@ _ngx_http_est_request_simple(ngx_http_request_t *r) {
     X509 *cert;
     ngx_buf_t *b;
     ngx_chain_t out;
+    ngx_table_elt_t *h;
     ngx_int_t rc;
     u_char *content;
     size_t length;
@@ -399,6 +417,8 @@ _ngx_http_est_request_simple(ngx_http_request_t *r) {
     cert = NULL;
     p7 = NULL;
 
+    lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
+    /* assert(lcf != NULL); */
     if ((req = _ngx_http_est_request_parse_csr(r)) == NULL) {
         goto error;
     }
@@ -446,6 +466,16 @@ _ngx_http_est_request_simple(ngx_http_request_t *r) {
     r->headers_out.content_type_lowcase = NULL;
     r->headers_out.status = NGX_HTTP_OK;
     r->headers_out.content_length_n = b->last - b->pos;
+
+    if (lcf->legacy) {
+        h = ngx_list_push(&r->headers_out.headers);
+        if (h == NULL) {
+            goto error;
+        }
+        h->hash = 1;
+        ngx_str_set(&h->key, "Content-Transfer-Encoding");
+        ngx_str_set(&h->value, "base64");
+    }
 
     rc = ngx_http_send_header(r);
     if ((r->header_only) ||
@@ -610,6 +640,7 @@ ngx_http_est_request(ngx_http_request_t *r) {
 ngx_int_t 
 ngx_http_est_request_cacerts(ngx_http_request_t *r, ngx_buf_t *b) {
     ngx_http_est_loc_conf_t *lcf;
+    ngx_table_elt_t *h;
     BIO *bp;
     BUF_MEM *ptr;
     u_char *content;
@@ -625,6 +656,16 @@ ngx_http_est_request_cacerts(ngx_http_request_t *r, ngx_buf_t *b) {
     r->headers_out.content_type_len = r->headers_out.content_type.len;
     r->headers_out.content_type_lowcase = NULL;
     r->headers_out.status = NGX_HTTP_OK;
+
+    if (lcf->legacy) {
+        h = ngx_list_push(&r->headers_out.headers);
+        if (h == NULL) {
+            return NGX_ERROR;
+        }
+        h->hash = 1;
+        ngx_str_set(&h->key, "Content-Transfer-Encoding");
+        ngx_str_set(&h->value, "base64");
+    }
 
     rc = NGX_ERROR;
     if (((bp = BIO_new(BIO_s_mem())) == NULL) ||
@@ -658,6 +699,7 @@ error:
 
 ngx_int_t 
 ngx_http_est_request_csrattrs(ngx_http_request_t *r, ngx_buf_t *b) {
+    ngx_table_elt_t *h;
     ASN1_OBJECT *obj;
     ASN1_TYPE *type;
     BUF_MEM *buf;
@@ -679,6 +721,16 @@ ngx_http_est_request_csrattrs(ngx_http_request_t *r, ngx_buf_t *b) {
     r->headers_out.content_type_len = r->headers_out.content_type.len;
     r->headers_out.content_type_lowcase = NULL;
     r->headers_out.status = NGX_HTTP_NO_CONTENT;
+
+    if (lcf->legacy) {
+        h = ngx_list_push(&r->headers_out.headers);
+        if (h == NULL) {
+            return NGX_ERROR;
+        }
+        h->hash = 1;
+        ngx_str_set(&h->key, "Content-Transfer-Encoding");
+        ngx_str_set(&h->value, "base64");
+    }
 
     /*
         The following generates an ASN.1 sequence of attributes which must be 

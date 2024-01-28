@@ -40,6 +40,7 @@ typedef struct {
     ngx_str_t   csr_attrs;
     ngx_flag_t  enable;
     ngx_int_t   http; 
+    ngx_flag_t  legacy;
     ngx_flag_t  pop;
     ngx_int_t   verify_client;
 
@@ -84,7 +85,7 @@ ngx_int_t ngx_http_est_auth(ngx_http_request_t *r);
 
 PKCS7 * ngx_http_est_pkcs7(BIO *bp);
 
-EVP_PKEY * ngx_http_est_privkey(ngx_http_request_t *r);
+EVP_PKEY * ngx_http_est_privkey(ngx_http_request_t *r, X509_REQ *req);
 
 ngx_int_t ngx_http_est_request(ngx_http_request_t *r);
 

@@ -10,8 +10,8 @@
 #define _PKCS8_RSA_BITS         (2048)
 
 
-EVP_PKEY *
-ngx_http_est_privkey(ngx_http_request_t *r) {
+EVP_PKEY * 
+ngx_http_est_privkey(ngx_http_request_t *r, X509_REQ *req) {
     EC_GROUP *group;
     EC_KEY *ec;
     EVP_PKEY *pkey;

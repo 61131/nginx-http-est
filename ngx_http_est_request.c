@@ -20,6 +20,8 @@ static void _ngx_http_est_request_serverkeygen(ngx_http_request_t *r);
 
 static void _ngx_http_est_request_simple(ngx_http_request_t *r);
 
+static ngx_int_t _ngx_http_est_request_validate_reenroll(ngx_http_request_t *r, X509_REQ *req);
+
 
 static ngx_buf_t *
 _ngx_http_est_request_body(ngx_http_request_t *r) {
@@ -229,7 +231,6 @@ error:
 
 static void 
 _ngx_http_est_request_serverkeygen(ngx_http_request_t *r) {
-    ngx_http_est_loc_conf_t *lcf;
     BIO *pem, *pkcs7, *pkcs8;
     BUF_MEM *ptr7, *ptr8;
     EVP_PKEY *pkey;
@@ -261,8 +262,6 @@ _ngx_http_est_request_serverkeygen(ngx_http_request_t *r) {
         to the client.
     */
 
-    lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
-    /* assert(lcf != NULL); */
     if ((req = _ngx_http_est_request_parse_csr(r)) == NULL) {
         rc = NGX_HTTP_BAD_REQUEST;
         goto error;
@@ -295,9 +294,7 @@ _ngx_http_est_request_serverkeygen(ngx_http_request_t *r) {
             ngx_strlen("Content-Type: application/pkcs8") +
             (ngx_strlen(CRLF) * 7) +
             /* '-' */ 8;
-    if (lcf->legacy) {
-        length += (ngx_strlen("Content-Transfer-Encoding: base64" CRLF)) * 2;
-    }
+    length += (ngx_strlen("Content-Transfer-Encoding: base64" CRLF)) * 2;
 
     if (((pem = BIO_new(BIO_s_mem())) == NULL) ||
             (!PEM_write_bio_X509(pem, cert))) {
@@ -343,9 +340,7 @@ _ngx_http_est_request_serverkeygen(ngx_http_request_t *r) {
             "Content-Type: application/pkcs7-mime" CRLF,
             _MIME_BOUNDARY_STRING);
 
-    if (lcf->legacy) {
-        b->last = ngx_sprintf(b->last, "Content-Transfer-Encoding: base64" CRLF);
-    }
+    b->last = ngx_sprintf(b->last, "Content-Transfer-Encoding: base64" CRLF);
     b->last = ngx_copy(b->last, CRLF, 2);
     b->last = ngx_copy(b->last, ptr7->data + 22, ptr7->length - 42);
     b->last = ngx_sprintf(b->last,
@@ -353,9 +348,7 @@ _ngx_http_est_request_serverkeygen(ngx_http_request_t *r) {
             "Content-Type: application/pkcs8" CRLF,
             _MIME_BOUNDARY_STRING);
 
-    if (lcf->legacy) {
-        b->last = ngx_sprintf(b->last, "Content-Transfer-Encoding: base64" CRLF);
-    }
+    b->last = ngx_sprintf(b->last, "Content-Transfer-Encoding: base64" CRLF);
     b->last = ngx_copy(b->last, CRLF, 2);
     b->last = ngx_copy(b->last, ptr8->data + 28, ptr8->length - 54);
     b->last = ngx_sprintf(b->last,
@@ -391,7 +384,6 @@ error:
 
 static void
 _ngx_http_est_request_simple(ngx_http_request_t *r) {
-    ngx_http_est_loc_conf_t *lcf;
     BIO *pem, *pkcs7;
     BUF_MEM *ptr;
     PKCS7 *p7;
@@ -417,9 +409,10 @@ _ngx_http_est_request_simple(ngx_http_request_t *r) {
     cert = NULL;
     p7 = NULL;
 
-    lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
-    /* assert(lcf != NULL); */
     if ((req = _ngx_http_est_request_parse_csr(r)) == NULL) {
+        goto error;
+    }
+    if (_ngx_http_est_request_validate_reenroll(r, req) != 0) {
         goto error;
     }
     if ((cert = ngx_http_est_x509_generate(r, req)) == NULL) {
@@ -467,15 +460,13 @@ _ngx_http_est_request_simple(ngx_http_request_t *r) {
     r->headers_out.status = NGX_HTTP_OK;
     r->headers_out.content_length_n = b->last - b->pos;
 
-    if (lcf->legacy) {
-        h = ngx_list_push(&r->headers_out.headers);
-        if (h == NULL) {
-            goto error;
-        }
-        h->hash = 1;
-        ngx_str_set(&h->key, "Content-Transfer-Encoding");
-        ngx_str_set(&h->value, "base64");
+    h = ngx_list_push(&r->headers_out.headers);
+    if (h == NULL) {
+        goto error;
     }
+    h->hash = 1;
+    ngx_str_set(&h->key, "Content-Transfer-Encoding");
+    ngx_str_set(&h->value, "base64");
 
     rc = ngx_http_send_header(r);
     if ((r->header_only) ||
@@ -492,6 +483,136 @@ error:
     X509_REQ_free(req);
 
     ngx_http_finalize_request(r, rc);
+}
+
+
+static ngx_int_t
+_ngx_http_est_request_validate_reenroll(ngx_http_request_t *r, X509_REQ *req) {
+    ASN1_OBJECT *obj;
+    BIO *mem1, *mem2;
+    BUF_MEM *ptr1, *ptr2;
+    STACK_OF(X509_EXTENSION) *exts;
+    X509 *cert;
+    X509_EXTENSION *ext;
+    ngx_connection_t *c;
+    ngx_http_core_loc_conf_t *clcf;
+    u_char *ptr;
+    char *s1, *s2;
+    int i, ret;
+
+    /*
+        This function is intended to validate the subject and subject alternative 
+        name fields provided in the certificate signing request against the client 
+        TLS certificate. Note that this function will return zero (no error) where
+        the request is either a valid re-enrollment request or *not* a re-enroll
+        request. 
+    */
+
+    clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
+    /* assert(clcf != NULL); */
+    ptr = r->uri.data;
+    /* assert(ngx_strstr(ptr, clcf->name.data) == (char *) ptr); */
+    ptr += ngx_strlen(clcf->name.data);
+    if (*ptr == '/') {
+        ++ptr;
+    }
+    if (ngx_strncmp(ptr, "simplereenroll", 14) != 0) {
+        return NGX_OK;
+    }
+
+    c = r->connection;
+    if (!c->ssl) {
+        return NGX_OK;
+    }
+    cert = SSL_get_peer_certificate(c->ssl->connection);
+    if (cert == NULL) {
+        return NGX_OK;
+    }
+
+    ret = NGX_ERROR;
+    mem1 = mem2 = NULL;
+    ptr1 = ptr2 = NULL;
+
+    s1 = X509_NAME_oneline(X509_get_subject_name(cert), 0, 0);
+    s2 = X509_NAME_oneline(X509_REQ_get_subject_name(req), 0, 0);
+    if ((s1 == NULL) ||
+            (s2 == NULL) ||
+            (ngx_strcmp(s1, s2) != 0)) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, 
+                "%s: subject differs between certificate and certificate request",
+                MODULE_NAME);
+        goto error;
+    }
+
+    exts = (STACK_OF(X509_EXTENSION) *) X509_get0_extensions(cert);
+    for (i = 0; i < sk_X509_EXTENSION_num(exts); i++) {
+        ext = sk_X509_EXTENSION_value(exts, i);
+        /* assert(ext != NULL); */
+        obj = X509_EXTENSION_get_object(ext);
+        /* assert(obj != NULL); */
+        if (OBJ_obj2nid(obj) != NID_subject_alt_name) {
+            continue;
+        }
+
+        if ((mem1 = BIO_new(BIO_s_mem())) == NULL) {
+            goto error;
+        }
+        if (!X509V3_EXT_print(mem1, ext, 0, 0)) {
+            goto error;
+        }
+        BIO_get_mem_ptr(mem1, &ptr1);
+        /* assert(ptr1 != NULL); */
+        break;
+    }
+    sk_X509_EXTENSION_pop_free(exts, X509_EXTENSION_free);
+
+    exts = X509_REQ_get_extensions(req);
+    for (i = 0; i < sk_X509_EXTENSION_num(exts); i++) {
+        ext = sk_X509_EXTENSION_value(exts, i);
+        /* assert(ext != NULL); */
+        obj = X509_EXTENSION_get_object(ext);
+        /* assert(obj != NULL); */
+        if (OBJ_obj2nid(obj) != NID_subject_alt_name) {
+            continue;
+        }
+
+        if ((mem2 = BIO_new(BIO_s_mem())) == NULL) {
+            goto error;
+        }
+        if (!X509V3_EXT_print(mem2, ext, 0, 0)) {
+            goto error;
+        }
+        BIO_get_mem_ptr(mem2, &ptr2);
+        /* assert(ptr2 != NULL); */
+        break;
+    }
+    sk_X509_EXTENSION_pop_free(exts, X509_EXTENSION_free);
+
+    for (;;) {
+        if ((ptr1 == NULL) &&
+                (ptr2 == NULL)) {
+            break;
+        }
+        if ((ptr1 == NULL) ||
+            (ptr2 == NULL) ||
+            (ptr1->length != ptr2->length) ||
+            (memcmp(ptr1->data, ptr2->data, ptr1->length) != 0)) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, 
+                    "%s: subjectAltName extension differs between certificate and certificate request",
+                    MODULE_NAME);
+            goto error;
+        }
+        break;
+    }
+
+    ret = NGX_OK;
+error:
+    BIO_free(mem2);
+    BIO_free(mem1);
+    OPENSSL_free(s2);
+    OPENSSL_free(s1);
+
+    return ret;
 }
 
 
@@ -522,11 +643,6 @@ ngx_http_est_request(ngx_http_request_t *r) {
         EST module to seamlessly handle different - and even non-standard - path
         segments that may be employed within a configuration.
     */
-
-    if ((!r->connection->ssl) &&
-            (lcf->http == HTTP_DISALLOW)) { 
-        return NGX_HTTP_FORBIDDEN;
-    }
 
     ptr = r->uri.data;
     if (ngx_strstr(ptr, clcf->name.data) != (char *) ptr) {
@@ -573,9 +689,17 @@ ngx_http_est_request(ngx_http_request_t *r) {
         if (!d->verify) {
             break;
         }
-        if ((!r->connection->ssl) &&
-              (lcf->http == HTTP_LIMIT)) { 
-            return NGX_HTTP_NOT_ALLOWED;
+
+        /*
+            The following will disallow the connection is the EST endpoint requires 
+            verification, unless the connection is established over TLS or the client 
+            has successfully performed HTTP authentication.
+        */
+
+        if (!r->connection->ssl) {
+            if (ngx_http_auth_basic_user(r) == NGX_DECLINED) {
+                return NGX_HTTP_NOT_ALLOWED;
+            }
         }
         if ((lcf->verify_client & VERIFY_CERTIFICATE) != 0) {
             if (!r->connection->ssl) {
@@ -657,15 +781,13 @@ ngx_http_est_request_cacerts(ngx_http_request_t *r, ngx_buf_t *b) {
     r->headers_out.content_type_lowcase = NULL;
     r->headers_out.status = NGX_HTTP_OK;
 
-    if (lcf->legacy) {
-        h = ngx_list_push(&r->headers_out.headers);
-        if (h == NULL) {
-            return NGX_ERROR;
-        }
-        h->hash = 1;
-        ngx_str_set(&h->key, "Content-Transfer-Encoding");
-        ngx_str_set(&h->value, "base64");
+    h = ngx_list_push(&r->headers_out.headers);
+    if (h == NULL) {
+        return NGX_ERROR;
     }
+    h->hash = 1;
+    ngx_str_set(&h->key, "Content-Transfer-Encoding");
+    ngx_str_set(&h->value, "base64");
 
     rc = NGX_ERROR;
     if (((bp = BIO_new(BIO_s_mem())) == NULL) ||
@@ -722,15 +844,13 @@ ngx_http_est_request_csrattrs(ngx_http_request_t *r, ngx_buf_t *b) {
     r->headers_out.content_type_lowcase = NULL;
     r->headers_out.status = NGX_HTTP_NO_CONTENT;
 
-    if (lcf->legacy) {
-        h = ngx_list_push(&r->headers_out.headers);
-        if (h == NULL) {
-            return NGX_ERROR;
-        }
-        h->hash = 1;
-        ngx_str_set(&h->key, "Content-Transfer-Encoding");
-        ngx_str_set(&h->value, "base64");
+    h = ngx_list_push(&r->headers_out.headers);
+    if (h == NULL) {
+        return NGX_ERROR;
     }
+    h->hash = 1;
+    ngx_str_set(&h->key, "Content-Transfer-Encoding");
+    ngx_str_set(&h->value, "base64");
 
     /*
         The following generates an ASN.1 sequence of attributes which must be 

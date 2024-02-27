@@ -86,13 +86,6 @@ static ngx_conf_enum_t ngx_http_est_enum_client_verify[] = {
     { ngx_null_string, 0 },
 };
 
-static ngx_conf_enum_t ngx_http_est_enum_http[] = {
-    { ngx_string("off"), HTTP_DISALLOW },
-    { ngx_string("on"), HTTP_ALLOW },
-    { ngx_string("limit"), HTTP_LIMIT },
-    { ngx_null_string, 0 },
-};
-
 static ngx_command_t ngx_http_est_commands[] = {
 
     /* Directives associated with EST operations */
@@ -116,20 +109,6 @@ static ngx_command_t ngx_http_est_commands[] = {
         ngx_http_est_command_csr_attrs,
         NGX_HTTP_LOC_CONF_OFFSET,
         offsetof(ngx_http_est_loc_conf_t, csr_attrs),
-        NULL },
-
-    { ngx_string("est_http"),
-        NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_conf_set_enum_slot,
-        NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_est_loc_conf_t, http),
-        &ngx_http_est_enum_http },
-
-    { ngx_string("est_legacy"),
-        NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_conf_set_flag_slot,
-        NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_est_loc_conf_t, legacy),
         NULL },
 
     { ngx_string("est_pop"), 
@@ -417,16 +396,14 @@ ngx_http_est_create_loc_conf(ngx_conf_t *cf) {
             lcf->csr_attrs = { 0, NULL };
     */
 
-    lcf->enable = NGX_CONF_UNSET;
-    lcf->http = NGX_CONF_UNSET;
-    lcf->legacy = NGX_CONF_UNSET;
-    lcf->pop = NGX_CONF_UNSET;
-    lcf->verify_client = NGX_CONF_UNSET;
     lcf->attributes = NULL;
-    lcf->ca_x509 = NGX_CONF_UNSET_PTR;
     lcf->ca_key = NGX_CONF_UNSET_PTR;
     lcf->ca_root = NGX_CONF_UNSET_PTR;
     lcf->ca_validity_days = NGX_CONF_UNSET;
+    lcf->ca_x509 = NGX_CONF_UNSET_PTR;
+    lcf->enable = NGX_CONF_UNSET;
+    lcf->pop = NGX_CONF_UNSET;
+    lcf->verify_client = NGX_CONF_UNSET;
 
     return lcf;
 }
@@ -455,21 +432,19 @@ ngx_http_est_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child) {
     ngx_http_est_loc_conf_t *prev = parent;
     ngx_http_est_loc_conf_t *conf = child;
     
+    ngx_conf_merge_ptr_value(conf->attributes, prev->attributes, NULL);
     ngx_conf_merge_str_value(conf->auth_request, prev->auth_request, "");
+    ngx_conf_merge_ptr_value(conf->ca_key, prev->ca_key, NULL);
     ngx_conf_merge_str_value(conf->ca_private_key, prev->ca_private_key, "");
+    ngx_conf_merge_ptr_value(conf->ca_root, prev->ca_root, NULL);
     ngx_conf_merge_str_value(conf->ca_root_certificate, prev->ca_root_certificate, "");
     ngx_conf_merge_str_value(conf->ca_serial_number, prev->ca_serial_number, "");
     ngx_conf_merge_value(conf->ca_validity_days, prev->ca_validity_days, 30);
+    ngx_conf_merge_ptr_value(conf->ca_x509, prev->ca_x509, NULL);
     ngx_conf_merge_str_value(conf->csr_attrs, prev->csr_attrs, "");
     ngx_conf_merge_value(conf->enable, prev->enable, 0);
-    ngx_conf_merge_value(conf->http, prev->http, HTTP_DISALLOW);
-    ngx_conf_merge_value(conf->legacy, prev->legacy, 0);
     ngx_conf_merge_value(conf->pop, prev->pop, 0);
     ngx_conf_merge_value(conf->verify_client, prev->verify_client, VERIFY_NONE);
-    ngx_conf_merge_ptr_value(conf->attributes, prev->attributes, NULL);
-    ngx_conf_merge_ptr_value(conf->ca_x509, prev->ca_x509, NULL);
-    ngx_conf_merge_ptr_value(conf->ca_key, prev->ca_key, NULL);
-    ngx_conf_merge_ptr_value(conf->ca_root, prev->ca_root, NULL);
     
     return NGX_CONF_OK;
 }

@@ -852,6 +852,11 @@ ngx_http_est_request_csrattrs(ngx_http_request_t *r, ngx_buf_t *b) {
     ngx_str_set(&h->key, "Content-Transfer-Encoding");
     ngx_str_set(&h->value, "base64");
 
+    if ((lcf->attributes == NULL) ||
+            (lcf->attributes->nelts == 0)) {
+        return NGX_OK;
+    }
+
     /*
         The following generates an ASN.1 sequence of attributes which must be 
         included in any certificate signing requests processed by the EST server.
@@ -865,26 +870,24 @@ ngx_http_est_request_csrattrs(ngx_http_request_t *r, ngx_buf_t *b) {
     if ((buf = BUF_MEM_new()) == NULL) {
         goto error;
     }
-
     if ((sk = sk_ASN1_TYPE_new_null()) == NULL) {
         goto error;
     }
-    if (lcf->attributes != NULL) {
-        for (i = 0; i < lcf->attributes->nelts; ++i) {
-            if ((type = ASN1_TYPE_new()) == NULL) {
-                goto error;
-            }
-            if ((obj = OBJ_txt2obj((const char *)((ngx_str_t *)lcf->attributes->elts)[i].data, 0)) == NULL) {
-                goto error;
-            }
-            type->type = V_ASN1_OBJECT;
-            type->value.object = obj;
-
-            if (!sk_ASN1_TYPE_push(sk, type)) {
-                goto error;
-            }
-            type = NULL;
+    /* assert(lcf->attributes != NULL); */
+    for (i = 0; i < lcf->attributes->nelts; ++i) {
+        if ((type = ASN1_TYPE_new()) == NULL) {
+            goto error;
         }
+        if ((obj = OBJ_txt2obj((const char *)((ngx_str_t *)lcf->attributes->elts)[i].data, 0)) == NULL) {
+            goto error;
+        }
+        type->type = V_ASN1_OBJECT;
+        type->value.object = obj;
+
+        if (!sk_ASN1_TYPE_push(sk, type)) {
+            goto error;
+        }
+        type = NULL;
     }
 
     ptr = NULL;

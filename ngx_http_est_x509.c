@@ -33,11 +33,12 @@ _ngx_http_est_x509_cacert(ngx_http_request_t *r) {
 
     lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
     /* assert(lcf != NULL); */
-    ngx_memzero(path, sizeof(path));
+    /* ngx_memzero(path, sizeof(path)); */
     ngx_snprintf((u_char *)path, sizeof(path), 
             "%*s", 
             lcf->ca_root_certificate.len,
             lcf->ca_root_certificate.data);
+    path[lcf->ca_root_certificate.len] = '\0';
     if (ngx_strlen(path) == 0) {
         return NULL;
     }
@@ -59,11 +60,12 @@ _ngx_http_est_x509_privkey(ngx_http_request_t *r) {
 
     lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
     /* assert(lcf != NULL); */
-    ngx_memzero(path, sizeof(path));
+    /* ngx_memzero(path, sizeof(path)); */
     ngx_snprintf((u_char *)path, sizeof(path),
             "%*s",
             lcf->ca_private_key.len,
             lcf->ca_private_key.data);
+    path[lcf->ca_private_key.len] = '\0';
     if (ngx_strlen(path) == 0) {
         return NULL;
     }
@@ -124,11 +126,12 @@ _ngx_http_est_x509_serial_number(ngx_http_request_t *r) {
 
     lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
     /* assert(lcf != NULL); */
-    ngx_memzero(path, sizeof(path));
+    /* ngx_memzero(path, sizeof(path)); */
     ngx_snprintf((u_char *)path, sizeof(path), 
             "%*s", 
             lcf->ca_serial_number.len, 
             lcf->ca_serial_number.data);
+    path[lcf->ca_serial_number.len] = '\0';
     if (ngx_strlen(path) == 0) {
 
         /*

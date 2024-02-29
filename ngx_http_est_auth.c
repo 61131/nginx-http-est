@@ -19,6 +19,14 @@ _ngx_http_est_auth_required(ngx_http_request_t *r) {
     ngx_int_t i, len;
     u_char *ptr, *uri;
 
+    /*
+        This function asserts where HTTP authentication is required in the context 
+        of the nginx-http-est module. This authentication is not necessary where the 
+        module is disabled, where the HTTP client has already been verified by way 
+        of TLS certificate validation and where the specific EST end-point is 
+        documented as being allowed without authentication.
+    */
+
     lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
     /* assert(lcf != NULL); */
     if (lcf->enable == 0) {
@@ -90,7 +98,7 @@ ngx_http_est_auth(ngx_http_request_t *r) {
                 "%s: missing subrequest uri", 
                 MODULE_NAME);
         /* return NGX_ERROR; */
-        return NGX_HTTP_UNAUTHORIZED;
+        return NGX_HTTP_UNAUTHORIZED;   //  Authentication required, but subrequest URI configuration missing
     }
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_est_module);

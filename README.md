@@ -198,6 +198,12 @@ Configures the certificate authority trust anchor to be used for EST operations.
 
 This directive specifies the certificate - in PEM format - to be returned to EST clients to bootstrap the trust anchor between client and server. EST clients may request this trust anchor certificate information with a HTTPS GET message using an operation path of "/cacerts". The EST server will not require client authentication or authorization to reply to this request.
 
+## Authentication
+
+The EST server requires client authentication for access to client certificate request end-points, specifically simple enrollment and re-enrollment of clients ("/simpleenroll" and "/simplereenroll") and server-side key generation ("/serverkeygen") operations. Client authentication is not required for the boot-strapping operations of retrieving the certificate authority trust anchor ("/cacerts") and required CSR attributes ("/csrattrs").
+
+When authenticating a client, the EST server will perform TLS certificate validation (as configured through the ssl_client_certificate parameter) or HTTP basic authentication against a back-end service (as configured through the est_auth_request parameter). A client is considered to be verified if either of these authentication types are successful.
+
 ## Limitations
 
 The following limitations are noted with respect to this EST server implementation:

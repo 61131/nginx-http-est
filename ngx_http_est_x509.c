@@ -32,10 +32,7 @@ _ngx_http_est_x509_cacert(ngx_http_request_t *r) {
     char path[PATH_MAX];
 
     lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
-    if (!lcf) {
-        return NULL;
-    }
-
+    /* assert(lcf != NULL); */
     ngx_memzero(path, sizeof(path));
     ngx_snprintf((u_char *)path, sizeof(path), 
             "%*s", 
@@ -61,10 +58,7 @@ _ngx_http_est_x509_privkey(ngx_http_request_t *r) {
     char path[PATH_MAX];
 
     lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
-    if (!lcf) {
-        return NULL;
-    }
-
+    /* assert(lcf != NULL); */
     ngx_memzero(path, sizeof(path));
     ngx_snprintf((u_char *)path, sizeof(path),
             "%*s",
@@ -129,10 +123,7 @@ _ngx_http_est_x509_serial_number(ngx_http_request_t *r) {
     size_t length;
 
     lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
-    if (!lcf) {
-        return NULL;
-    }
-
+    /* assert(lcf != NULL); */
     ngx_memzero(path, sizeof(path));
     ngx_snprintf((u_char *)path, sizeof(path), 
             "%*s", 
@@ -206,12 +197,11 @@ ngx_http_est_x509_generate(ngx_http_request_t *r, X509_REQ *req) {
     X509 *cacert, *cert;
     X509_EXTENSION *ext;
     X509_NAME *subj;
+    char *s;
     int i, j;
 
     lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
-    if (!lcf) {
-        return NULL;
-    }
+    /* assert(lcf != NULL); */
     
     /*
         The following actions to verify the signature associated with the client-
@@ -312,11 +302,15 @@ ngx_http_est_x509_generate(ngx_http_request_t *r, X509_REQ *req) {
     EVP_PKEY_free(pkey);
     ASN1_INTEGER_free(serial);
 
-    ngx_log_error(NGX_LOG_NOTICE, r->connection->log, 0,
-            "%s: certificate: \"%s\", subject: \"%s\"",
-            MODULE_NAME,
-            i2s_ASN1_INTEGER(NULL, X509_get0_serialNumber(cert)),
-            X509_NAME_oneline(X509_get_subject_name(cert), 0, 0));
+    s = X509_NAME_oneline(X509_get_subject_name(cert), 0, 0);
+    if (s != NULL) {
+        ngx_log_error(NGX_LOG_NOTICE, r->connection->log, 0,
+                "%s: certificate: \"%s\", subject: \"%s\"",
+                MODULE_NAME,
+                i2s_ASN1_INTEGER(NULL, X509_get0_serialNumber(cert)),
+                s);
+        OPENSSL_free(s);
+    }
 
     return cert;
 

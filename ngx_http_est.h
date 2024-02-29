@@ -14,14 +14,6 @@
 #define MODULE_NAME     ("est")
 
 
-typedef enum {
-    VERIFY_NONE = 0,
-    VERIFY_AUTHENTICATION = 1,
-    VERIFY_CERTIFICATE = 2,
-    VERIFY_BOTH = 3,
-}
-ngx_http_est_verify_e;
-
 typedef struct {
     ngx_conf_t  *cf;
 
@@ -33,7 +25,6 @@ typedef struct {
     ngx_str_t   csr_attrs;
     ngx_flag_t  enable;
     ngx_flag_t  pop;
-    ngx_int_t   verify_client;
 
     ngx_array_t *attributes;
 

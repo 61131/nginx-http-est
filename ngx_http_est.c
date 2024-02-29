@@ -77,15 +77,6 @@ ngx_http_est_dispatch_t ngx_http_est_dispatch[] = {
 };
 
 
-static ngx_conf_enum_t ngx_http_est_enum_client_verify[] = {
-    { ngx_string("none"), VERIFY_NONE },
-    { ngx_string("auth"), VERIFY_AUTHENTICATION }, 
-    { ngx_string("cert"), VERIFY_CERTIFICATE },
-    { ngx_string("both"), VERIFY_BOTH }, 
- /* { ngx_string("any"), VERIFY_ANY }, */
-    { ngx_null_string, 0 },
-};
-
 static ngx_command_t ngx_http_est_commands[] = {
 
     /* Directives associated with EST operations */
@@ -124,13 +115,6 @@ static ngx_command_t ngx_http_est_commands[] = {
         NGX_HTTP_LOC_CONF_OFFSET,
         offsetof(ngx_http_est_loc_conf_t, ca_root_certificate),
         NULL },
-
-    { ngx_string("est_verify_client"),
-        NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_conf_set_enum_slot,
-        NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_est_loc_conf_t, verify_client),
-        &ngx_http_est_enum_client_verify },
 
     /* Directives associated with CA operations */
 
@@ -403,7 +387,6 @@ ngx_http_est_create_loc_conf(ngx_conf_t *cf) {
     lcf->ca_x509 = NGX_CONF_UNSET_PTR;
     lcf->enable = NGX_CONF_UNSET;
     lcf->pop = NGX_CONF_UNSET;
-    lcf->verify_client = NGX_CONF_UNSET;
 
     return lcf;
 }
@@ -444,7 +427,6 @@ ngx_http_est_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child) {
     ngx_conf_merge_str_value(conf->csr_attrs, prev->csr_attrs, "");
     ngx_conf_merge_value(conf->enable, prev->enable, 0);
     ngx_conf_merge_value(conf->pop, prev->pop, 0);
-    ngx_conf_merge_value(conf->verify_client, prev->verify_client, VERIFY_NONE);
     
     return NGX_CONF_OK;
 }

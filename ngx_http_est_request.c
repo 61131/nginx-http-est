@@ -628,13 +628,9 @@ ngx_http_est_request(ngx_http_request_t *r) {
     u_char *ptr, *uri;
 
     lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
-    if (lcf == NULL) {
-        return NGX_DECLINED;
-    }
+    /* assert(lcf != NULL); */
     clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
-    if (clcf == NULL) {
-        return NGX_DECLINED;
-    }
+    /* assert(clcf != NULL); */
 
     /*
         This function implements handling for HTTP requests submitted to the EST API 
@@ -696,31 +692,17 @@ ngx_http_est_request(ngx_http_request_t *r) {
             has successfully performed HTTP authentication.
         */
 
-        if (!r->connection->ssl) {
-            if (ngx_http_auth_basic_user(r) == NGX_DECLINED) {
-                return NGX_HTTP_NOT_ALLOWED;
-            }
+        if ((r->connection->ssl) &&
+                (ngx_ssl_get_client_verify(r->connection, r->pool, &verify) == NGX_OK) &&
+                (ngx_strcmp(verify.data, "SUCCESS") == 0)) {
+            break;
         }
-        if ((lcf->verify_client & VERIFY_CERTIFICATE) != 0) {
-            if (!r->connection->ssl) {
-                ngx_log_error(NGX_LOG_WARN, r->connection->log, 0, 
-                        "%s: cannot verify certificate as client using non-secure connection",
-                        MODULE_NAME);
-                return NGX_HTTP_FORBIDDEN;
-            }
-
-            if (ngx_ssl_get_client_verify(r->connection, r->pool, &verify) != NGX_OK) {
-                return NGX_HTTP_INTERNAL_SERVER_ERROR;
-            }
-            if (ngx_strcmp(verify.data, "SUCCESS") != 0) {
-                ngx_log_error(NGX_LOG_WARN, r->connection->log, 0, 
-                        "%s: failed certificate verification",
-                        MODULE_NAME);
-                return NGX_HTTP_FORBIDDEN;
-            }
+        if ((lcf->auth_request.len > 0) &&
+                (ngx_http_auth_basic_user(r) != NGX_DECLINED)) {
+            break;
         }
 
-        break;  //  rc == 0
+        return NGX_HTTP_FORBIDDEN;
     }
     if (rc != 0) {
         return NGX_HTTP_NOT_FOUND;
@@ -772,10 +754,7 @@ ngx_http_est_request_cacerts(ngx_http_request_t *r, ngx_buf_t *b) {
     int rc;
 
     lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
-    if (lcf == NULL) {
-        return NGX_DECLINED;
-    }
-
+    /* assert(lcf != NULL); */
     ngx_str_set(&r->headers_out.content_type, "application/pkcs7-mime");
     r->headers_out.content_type_len = r->headers_out.content_type.len;
     r->headers_out.content_type_lowcase = NULL;
@@ -812,7 +791,6 @@ ngx_http_est_request_cacerts(ngx_http_request_t *r, ngx_buf_t *b) {
     r->headers_out.content_length_n = b->last - b->pos;
 
     rc = NGX_OK;
-
 error:
     BIO_free(bp);
     return rc;
@@ -835,10 +813,7 @@ ngx_http_est_request_csrattrs(ngx_http_request_t *r, ngx_buf_t *b) {
     size_t length;
 
     lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
-    if (lcf == NULL) {
-        return NGX_DECLINED;
-    }
-
+    /* assert(lcf != NULL); */
     ngx_str_set(&r->headers_out.content_type, "application/csrattrs");
     r->headers_out.content_type_len = r->headers_out.content_type.len;
     r->headers_out.content_type_lowcase = NULL;
@@ -929,7 +904,6 @@ ngx_http_est_request_csrattrs(ngx_http_request_t *r, ngx_buf_t *b) {
     r->headers_out.status = NGX_HTTP_OK;
 
     rc = NGX_OK;
-
 error:
     OPENSSL_free(type);
     sk_ASN1_TYPE_pop_free(sk, ASN1_TYPE_free);
@@ -953,9 +927,7 @@ ngx_http_est_request_simple_request(ngx_http_request_t *r, ngx_buf_t *b) {
     u_char *ptr;
 
     clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
-    if (clcf == NULL) {
-        return NGX_DECLINED;
-    }
+    /* assert(clcf != NULL); */
 
     /*
         This function will process the request headers before establishing a 

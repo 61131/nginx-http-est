@@ -15,18 +15,26 @@ _ngx_http_est_auth_required(ngx_http_request_t *r) {
     ngx_http_core_loc_conf_t *clcf;
     ngx_http_est_dispatch_t *d;
     ngx_http_est_loc_conf_t *lcf;
+    ngx_str_t verify;
     ngx_int_t i, len;
     u_char *ptr, *uri;
 
     lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
+    /* assert(lcf != NULL); */
     if (lcf->enable == 0) {
         return 0;
     }
-    if ((lcf->verify_client & VERIFY_AUTHENTICATION) == 0) {
+    if (lcf->auth_request.len == 0) {
+        return 0;
+    }
+    if ((r->connection->ssl) &&
+            (ngx_ssl_get_client_verify(r->connection, r->pool, &verify) == NGX_OK) &&
+            (ngx_strcmp(verify.data, "SUCCESS") == 0)) {
         return 0;
     }
 
     clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
+    /* assert(clcf != NULL); */
     /* assert(ngx_strstr(r->uri.data, clcf->name.data) == r->uri.data); */
     ptr = r->uri.data + ngx_strlen(clcf->name.data);
     if (*ptr == '/') {
@@ -79,6 +87,7 @@ ngx_http_est_auth(ngx_http_request_t *r) {
         return NGX_OK;
     }
     lcf = ngx_http_get_module_loc_conf(r, ngx_http_est_module);
+    /* assert(lcf != NULL); */
     if (lcf->auth_request.len == 0) {
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                 "%s: missing subrequest uri", 

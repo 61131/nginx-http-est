@@ -31,7 +31,6 @@ Note that the nginx-http-est module is dependent upon the HTTP SSL module for no
     server {
         ssl_certificate /etc/nginx/ssl/Server.crt;
         ssl_certificate_key /etc/nginx/ssl/Server.key;
-
         ssl_client_certificate /etc/nginx/ssl/Org-RootCA.crt;
         ssl_verify_client optional;
 
@@ -46,7 +45,6 @@ Note that the nginx-http-est module is dependent upon the HTTP SSL module for no
             est_csr_attrs /etc/nginx/ssl/csrattrs.der;
             est_pop on;
             est_root_certificate /etc/nginx/ssl/Org-RootCA.crt;
-            est_verify_client cert;
 
             est_ca_root_certificate /etc/nginx/ssl/Org-RootCA.crt;
             est_ca_private_key /etc/nginx/ssl/Org-RootCA.key;
@@ -199,20 +197,6 @@ Where enabled, this directive requires the client to include the tls-unique valu
 Configures the certificate authority trust anchor to be used for EST operations.
 
 This directive specifies the certificate - in PEM format - to be returned to EST clients to bootstrap the trust anchor between client and server. EST clients may request this trust anchor certificate information with a HTTPS GET message using an operation path of "/cacerts". The EST server will not require client authentication or authorization to reply to this request.
-
-### est_verify_client
-
-* **syntax:** `est_verify_client none|auth|cert|both`
-* **default:** `cert`
-* **context:** `location`
-
-Configures the mechanism to be used for verifying EST clients. 
-
-The EST server may authorize clients based upon either TLS certificate validation as per [RFC 5280](https://datatracker.ietf.org/doc/html/rfc5280) and/or HTTP-based authentication. 
-
-If TLS certificate validation is configured, the client certificate is verified as per the operation of the `ssl_client_certificate` and `ssl_verify_client` HTTP SSL directives. It is important to note that as not all EST operations require authorization, the `ssl_verify_client` directive for the HTTP server MUST be set to `optional`.
-
-For HTTP-based authentication, the `est_auth_request` directive must be set with the URI location against which subrquests are issued to determine whether the given client is authorized.
 
 ## Limitations
 

@@ -25,6 +25,7 @@ typedef struct {
     ngx_str_t   csr_attrs;
     ngx_flag_t  enable;
     ngx_flag_t  pop;
+    ngx_str_t   root_certificate;
 
     ngx_array_t *attributes;
 

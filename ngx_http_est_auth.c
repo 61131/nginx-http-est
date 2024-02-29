@@ -24,9 +24,6 @@ _ngx_http_est_auth_required(ngx_http_request_t *r) {
     if (lcf->enable == 0) {
         return 0;
     }
-    if (lcf->auth_request.len == 0) {
-        return 0;
-    }
     if ((r->connection->ssl) &&
             (ngx_ssl_get_client_verify(r->connection, r->pool, &verify) == NGX_OK) &&
             (ngx_strcmp(verify.data, "SUCCESS") == 0)) {

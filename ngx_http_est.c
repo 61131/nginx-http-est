@@ -113,7 +113,7 @@ static ngx_command_t ngx_http_est_commands[] = {
         NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
         ngx_http_est_command_root_certificate,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_est_loc_conf_t, ca_root_certificate),
+        offsetof(ngx_http_est_loc_conf_t, root_certificate),
         NULL },
 
     /* Directives associated with CA operations */
@@ -127,7 +127,7 @@ static ngx_command_t ngx_http_est_commands[] = {
 
     { ngx_string("est_ca_root_certificate"),
         NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_http_est_command_root_certificate,
+        ngx_conf_set_str_slot,
         NGX_HTTP_LOC_CONF_OFFSET,
         offsetof(ngx_http_est_loc_conf_t, ca_root_certificate),
         NULL },
@@ -336,11 +336,12 @@ ngx_http_est_command_root_certificate(ngx_conf_t *cf, ngx_command_t *cmd, void *
     */
 
     bp = NULL;
-    ngx_memzero(path, sizeof(path));
+    /* ngx_memzero(path, sizeof(path)); */
     ngx_snprintf((u_char *)path, sizeof(path),
             "%*s",
-            lcf->ca_root_certificate.len,
-            lcf->ca_root_certificate.data);
+            lcf->root_certificate.len,
+            lcf->root_certificate.data);
+    path[lcf->root_certificate.len] = '\0';
     if (ngx_strlen(path) == 0) {
         goto error;
     }
@@ -349,8 +350,8 @@ ngx_http_est_command_root_certificate(ngx_conf_t *cf, ngx_command_t *cmd, void *
         ngx_log_error(NGX_LOG_EMERG, cf->log, 0,
                 "%s: error opening root certificate: \"%*s\"",
                 MODULE_NAME,
-                lcf->ca_root_certificate.len,
-                lcf->ca_root_certificate.data);
+                lcf->root_certificate.len,
+                lcf->root_certificate.data);
         goto error;
     }
     rv = NGX_CONF_OK;
@@ -378,6 +379,7 @@ ngx_http_est_create_loc_conf(ngx_conf_t *cf) {
             lcf->ca_root_certificate = { 0, NULL };
             lcf->ca_serial_number = { 0, NULL };
             lcf->csr_attrs = { 0, NULL };
+            lcf->root_certificate = { 0, NULL };
     */
 
     lcf->attributes = NULL;
@@ -427,6 +429,7 @@ ngx_http_est_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child) {
     ngx_conf_merge_str_value(conf->csr_attrs, prev->csr_attrs, "");
     ngx_conf_merge_value(conf->enable, prev->enable, 0);
     ngx_conf_merge_value(conf->pop, prev->pop, 0);
+    ngx_conf_merge_str_value(conf->root_certificate, prev->root_certificate, "");
     
     return NGX_CONF_OK;
 }

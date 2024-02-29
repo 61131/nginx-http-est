@@ -89,7 +89,8 @@ ngx_http_est_auth(ngx_http_request_t *r) {
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                 "%s: missing subrequest uri", 
                 MODULE_NAME);
-        return NGX_ERROR;
+        /* return NGX_ERROR; */
+        return NGX_HTTP_UNAUTHORIZED;
     }
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_est_module);

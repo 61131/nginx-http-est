@@ -404,17 +404,19 @@ _ngx_http_est_request_simple(ngx_http_request_t *r) {
         certificate from the back-end certificate authority.
     */
 
-    rc = NGX_HTTP_BAD_REQUEST;
     pem = pkcs7 = NULL;
     cert = NULL;
     p7 = NULL;
 
+    rc = NGX_HTTP_BAD_REQUEST;
     if ((req = _ngx_http_est_request_parse_csr(r)) == NULL) {
         goto error;
     }
     if (_ngx_http_est_request_validate_reenroll(r, req) != 0) {
         goto error;
     }
+
+    rc = NGX_HTTP_INTERNAL_SERVER_ERROR;
     if ((cert = ngx_http_est_x509_generate(r, req)) == NULL) {
         goto error;
     }
